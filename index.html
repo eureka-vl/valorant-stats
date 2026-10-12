@@ -1,0 +1,3215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Valorant Match Dashboard</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>html, body { margin: 0; padding: 0; background: #07090c; } #root { min-height: 100vh; }</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/plain" id="app-source">
+
+
+const { useState, useCallback, useRef } = React;
+
+const TEAM_COLOR = { Blue: '#5CC8FF', Red: '#FF4655' };
+
+const COLUMNS = [
+  { key: 'acs', label: 'ACS' },
+  { key: 'kills', label: 'K' },
+  { key: 'deaths', label: 'D' },
+  { key: 'assists', label: 'A' },
+  { key: 'kd', label: 'K/D' },
+  { key: 'adr', label: 'ADR' },
+  { key: 'damage_made', label: 'DMG Made' },
+  { key: 'damage_received', label: 'DMG Recv' },
+  { key: 'hs_pct', label: 'HS%' },
+  { key: 'fk', label: 'FK' },
+  { key: 'fd', label: 'FD' },
+];
+
+const AGG_COLUMNS = [
+  { key: 'matches', label: 'M' },
+  { key: 'win_rate', label: 'Win%' },
+  { key: 'acs', label: 'ACS' },
+  { key: 'kills', label: 'K' },
+  { key: 'deaths', label: 'D' },
+  { key: 'assists', label: 'A' },
+  { key: 'kd', label: 'K/D' },
+  { key: 'adr', label: 'ADR' },
+  { key: 'hs_pct', label: 'HS%' },
+  { key: 'fk', label: 'FK' },
+  { key: 'fd', label: 'FD' },
+];
+
+const SIDE_LABEL = { attack: 'アタック', defense: 'ディフェンス', total: 'トータル' };
+const SIDE_ACCENT = { attack: '#FF9F45', defense: '#5CC8FF', total: '#9B8CFF' };
+
+function siteLabel(site) {
+  return site === 'None' ? '設置なし' : `${site}サイト`;
+}
+
+// ---------- Core single-match computation ----------
+
+function detectHalfAttacker(roundsArr) {
+  const counts = {};
+  for (let i = 0; i < Math.min(12, roundsArr.length); i++) {
+    const pb = roundsArr[i] && roundsArr[i].plant_events && roundsArr[i].plant_events.planted_by;
+    if (pb && pb.team) counts[pb.team] = (counts[pb.team] || 0) + 1;
+  }
+  let best = null, max = 0;
+  Object.entries(counts).forEach(([team, cnt]) => { if (cnt > max) { max = cnt; best = team; } });
+  if (best) return best;
+
+  const counts2 = {};
+  for (let i = 12; i < Math.min(24, roundsArr.length); i++) {
+    const pb = roundsArr[i] && roundsArr[i].plant_events && roundsArr[i].plant_events.planted_by;
+    if (pb && pb.team) counts2[pb.team] = (counts2[pb.team] || 0) + 1;
+  }
+  let best2 = null, max2 = 0;
+  Object.entries(counts2).forEach(([team, cnt]) => { if (cnt > max2) { max2 = cnt; best2 = team; } });
+  if (best2) return best2 === 'Red' ? 'Blue' : 'Red';
+
+  return 'Red';
+}
+
+function attackerForRound(roundNum1based, half1Attacker, roundData) {
+  const pb = roundData && roundData.plant_events && roundData.plant_events.planted_by;
+  if (pb && pb.team) return pb.team;
+  const half2Attacker = half1Attacker === 'Red' ? 'Blue' : 'Red';
+  if (roundNum1based <= 12) return half1Attacker;
+  if (roundNum1based <= 24) return half2Attacker;
+  const otIdx = roundNum1based - 24;
+  return otIdx % 2 === 1 ? half1Attacker : half2Attacker;
+}
+
+const ROUND_TYPE_ORDER = ['Pistol', 'Eco', 'Force Buy', 'Full Buy', 'Anti-Eco'];
+const ROUND_TYPE_LABEL_JA = { Pistol: 'ピストル', Eco: 'エコ', 'Force Buy': 'フォース', 'Full Buy': 'フルバイ', 'Anti-Eco': 'アンチエコ' };
+
+function classifyRoundType(roundNum1based, avgLoadout) {
+  const isPistol = roundNum1based === 1 || roundNum1based === 13;
+  if (isPistol) return 'Pistol';
+  if (avgLoadout < 2000) return 'Eco';
+  if (avgLoadout < 3400) return 'Force Buy';
+  return 'Full Buy';
+}
+
+function computeRoundTypeBreakdown(roundsArr) {
+  const overall = {};
+  const byTeam = {};
+  ROUND_TYPE_ORDER.forEach(t => { overall[t] = { rounds: 0, wins: 0 }; });
+
+  roundsArr.forEach((r, i) => {
+    const roundNum = i + 1;
+    const avgByTeam = {};
+    ['Red', 'Blue'].forEach(team => {
+      const loadouts = (r.player_stats || [])
+        .filter(ps => ps.player_team === team)
+        .map(ps => (ps.economy && ps.economy.loadout_value) || 0);
+      avgByTeam[team] = loadouts.length ? loadouts.reduce((a, b) => a + b, 0) / loadouts.length : null;
+    });
+
+    ['Red', 'Blue'].forEach(team => {
+      const opponent = team === 'Red' ? 'Blue' : 'Red';
+      const avg = avgByTeam[team];
+      if (avg === null) return;
+      let type = classifyRoundType(roundNum, avg);
+      // Anti-eco: this team is full-buying into an opponent who is eco'ing
+      if (type === 'Full Buy' && avgByTeam[opponent] !== null && classifyRoundType(roundNum, avgByTeam[opponent]) === 'Eco') {
+        type = 'Anti-Eco';
+      }
+      const won = r.winning_team === team ? 1 : 0;
+
+      if (!overall[type]) overall[type] = { rounds: 0, wins: 0 };
+      overall[type].rounds += 1;
+      overall[type].wins += won;
+
+      const key = team + '_' + type;
+      if (!byTeam[key]) byTeam[key] = { rounds: 0, wins: 0 };
+      byTeam[key].rounds += 1;
+      byTeam[key].wins += won;
+    });
+  });
+
+  const overallOut = {};
+  Object.entries(overall).forEach(([type, s]) => {
+    overallOut[type] = { rounds: s.rounds, wins: s.wins, win_rate: s.rounds ? Math.round((100 * s.wins / s.rounds) * 10) / 10 : 0 };
+  });
+  const byTeamOut = {};
+  Object.entries(byTeam).forEach(([key, s]) => {
+    byTeamOut[key] = { rounds: s.rounds, wins: s.wins, win_rate: s.rounds ? Math.round((100 * s.wins / s.rounds) * 10) / 10 : 0 };
+  });
+
+  return { overall: overallOut, by_team: byTeamOut };
+}
+
+// ---------- Post-plant positioning (defender distance from the spike) ----------
+
+const DIST_BAND_ORDER = ['Close', 'Mid', 'Far'];
+const DIST_BAND_LABEL_JA = { Close: 'クロース', Mid: 'ミッド', Far: 'ファー' };
+const DIST_BAND_THRESHOLDS = { close: 2500, mid: 5000 }; // game units
+
+function classifyDistanceBand(dist) {
+  if (dist < DIST_BAND_THRESHOLDS.close) return 'Close';
+  if (dist < DIST_BAND_THRESHOLDS.mid) return 'Mid';
+  return 'Far';
+}
+
+function computePostPlantData(roundsArr, playersMeta) {
+  const perRound = [];
+  const bandTotals = { Close: 0, Mid: 0, Far: 0 };
+  let closePresentWins = 0, closePresentRounds = 0;
+  let closeAbsentWins = 0, closeAbsentRounds = 0;
+  // 設置時点の人数状況（生存人数）の集計
+  const stateMap = {};
+  const diffGroups = { adv: { rounds: 0, wins: 0 }, even: { rounds: 0, wins: 0 }, dis: { rounds: 0, wins: 0 } };
+  const teamAgg = {};
+  let atkAliveSum = 0, defAliveSum = 0;
+
+  roundsArr.forEach((r, i) => {
+    const pe = r.plant_events;
+    if (!pe || !pe.plant_location || !pe.planted_by) {
+      perRound.push(null);
+      return;
+    }
+    const plantLoc = pe.plant_location;
+    const atkTeam = pe.planted_by.team;
+    const locs = pe.player_locations_on_plant || [];
+
+    const defenders = [];
+    const attackers = [];
+    locs.forEach(loc => {
+      const dx = loc.location.x - plantLoc.x;
+      const dy = loc.location.y - plantLoc.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const band = classifyDistanceBand(dist);
+      const entry = {
+        puuid: loc.player_puuid, name: loc.player_display_name, team: loc.player_team,
+        x: loc.location.x, y: loc.location.y, dist: Math.round(dist), band,
+      };
+      if (loc.player_team === atkTeam) attackers.push(entry);
+      else defenders.push(entry);
+    });
+
+    const closeCount = defenders.filter(d => d.band === 'Close').length;
+    defenders.forEach(d => { bandTotals[d.band] += 1; });
+
+    const attackerWon = r.winning_team === atkTeam;
+
+    // 人数状況: player_locations_on_plant には設置時点の生存者だけが入っている（キルログと照合済み）
+    const atkAlive = attackers.length, defAlive = defenders.length;
+    const diff = atkAlive - defAlive;
+    const grp = diff > 0 ? 'adv' : diff < 0 ? 'dis' : 'even';
+    const sk = atkAlive + 'v' + defAlive;
+    if (!stateMap[sk]) stateMap[sk] = { atk: atkAlive, def: defAlive, rounds: 0, wins: 0 };
+    stateMap[sk].rounds += 1; if (attackerWon) stateMap[sk].wins += 1;
+    diffGroups[grp].rounds += 1; if (attackerWon) diffGroups[grp].wins += 1;
+    atkAliveSum += atkAlive; defAliveSum += defAlive;
+    if (!teamAgg[atkTeam]) teamAgg[atkTeam] = { rounds: 0, wins: 0, atkSum: 0, defSum: 0, adv: { rounds: 0, wins: 0 }, even: { rounds: 0, wins: 0 }, dis: { rounds: 0, wins: 0 } };
+    const ta = teamAgg[atkTeam];
+    ta.rounds += 1; ta.atkSum += atkAlive; ta.defSum += defAlive;
+    ta[grp].rounds += 1;
+    if (attackerWon) { ta.wins += 1; ta[grp].wins += 1; }
+
+    if (closeCount > 0) {
+      closePresentRounds += 1;
+      if (attackerWon) closePresentWins += 1;
+    } else {
+      closeAbsentRounds += 1;
+      if (attackerWon) closeAbsentWins += 1;
+    }
+
+    perRound.push({
+      round: i, site: pe.plant_site, plantLocation: plantLoc, attackTeam: atkTeam,
+      winningTeam: r.winning_team, defenders, attackers, closeCount,
+      atkAlive, defAlive, plantTime: pe.plant_time_in_round != null ? pe.plant_time_in_round : null,
+    });
+  });
+
+  const roundsWithPlant = perRound.filter(Boolean).length;
+  const bandTotalSum = bandTotals.Close + bandTotals.Mid + bandTotals.Far;
+  const bandDistribution = {};
+  DIST_BAND_ORDER.forEach(b => {
+    bandDistribution[b] = {
+      count: bandTotals[b],
+      share: bandTotalSum ? Math.round((100 * bandTotals[b] / bandTotalSum) * 10) / 10 : 0,
+    };
+  });
+
+  const pcRate = (w, n) => n ? Math.round((100 * w / n) * 10) / 10 : 0;
+  const pcAvg = (sum, n) => n ? Math.round((sum / n) * 10) / 10 : 0;
+  const pcGroup = (g) => ({ rounds: g.rounds, wins: g.wins, win_rate: pcRate(g.wins, g.rounds) });
+  const pcByTeam = {};
+  Object.entries(teamAgg).forEach(([team, t]) => {
+    pcByTeam[team] = {
+      rounds: t.rounds, wins: t.wins, win_rate: pcRate(t.wins, t.rounds),
+      avgAtk: pcAvg(t.atkSum, t.rounds), avgDef: pcAvg(t.defSum, t.rounds),
+      adv: pcGroup(t.adv), even: pcGroup(t.even), dis: pcGroup(t.dis),
+    };
+  });
+  const playerCount = {
+    rounds: roundsWithPlant,
+    avgAtk: pcAvg(atkAliveSum, roundsWithPlant), avgDef: pcAvg(defAliveSum, roundsWithPlant),
+    byDiff: { adv: pcGroup(diffGroups.adv), even: pcGroup(diffGroups.even), dis: pcGroup(diffGroups.dis) },
+    byState: Object.values(stateMap)
+      .map(st => ({ ...st, diff: st.atk - st.def, win_rate: pcRate(st.wins, st.rounds) }))
+      .sort((a, b) => (b.diff - a.diff) || (b.atk - a.atk)),
+    byTeam: pcByTeam,
+  };
+
+  return {
+    perRound,
+    roundsWithPlant,
+    playerCount,
+    bandDistribution,
+    closeCompare: {
+      present: { rounds: closePresentRounds, wins: closePresentWins, win_rate: closePresentRounds ? Math.round((100 * closePresentWins / closePresentRounds) * 10) / 10 : 0 },
+      absent: { rounds: closeAbsentRounds, wins: closeAbsentWins, win_rate: closeAbsentRounds ? Math.round((100 * closeAbsentWins / closeAbsentRounds) * 10) / 10 : 0 },
+    },
+  };
+}
+
+
+function normalizeTs(v) {
+  if (typeof v !== 'number' || !v) return null;
+  return v > 1e12 ? v : v * 1000; // seconds -> ms
+}
+
+function buildDashboardData(json) {
+  const m = json && json.data && json.data[0];
+  if (!m) throw new Error('対応していない形式です（data[0] が見つかりません）');
+  const allPlayers = m.players && m.players.all_players;
+  if (!allPlayers || !allPlayers.length) throw new Error('players.all_players が見つかりません');
+  const roundsArr = m.rounds || [];
+  const killsArr = m.kills || [];
+  const roundsPlayed = (m.metadata && m.metadata.rounds_played) || roundsArr.length;
+
+  const playersMeta = {};
+  allPlayers.forEach(p => {
+    playersMeta[p.puuid] = {
+      puuid: p.puuid, name: p.name, tag: p.tag, team: p.team, character: p.character,
+      rank: p.currenttier_patched,
+    };
+  });
+
+  const half1Attacker = detectHalfAttacker(roundsArr);
+
+  const blankSide = () => ({
+    rounds: 0, kills: 0, deaths: 0, assists: 0, score: 0,
+    damage_made: 0, damage_received: 0,
+    headshots: 0, bodyshots: 0, legshots: 0, fk: 0, fd: 0,
+  });
+
+  const sideStats = {};
+  Object.keys(playersMeta).forEach(pid => { sideStats[pid] = { attack: blankSide(), defense: blankSide() }; });
+
+  const assistsByRoundPlayer = {};
+  const killsByRound = {};
+  // 「キル」は敵チームの相手を倒したものだけ（自滅・チームキルは除外。ゲームの公式スコアボードと同じ基準）
+  const isEnemyKill = (k) => {
+    const a = playersMeta[k.killer_puuid], b = playersMeta[k.victim_puuid];
+    return !!(a && b && k.killer_puuid !== k.victim_puuid && a.team !== b.team);
+  };
+  const enemyKillCount = {};
+  killsArr.forEach(k => {
+    const rnd = k.round;
+    if (!killsByRound[rnd]) killsByRound[rnd] = [];
+    killsByRound[rnd].push(k);
+    if (isEnemyKill(k)) {
+      const key = rnd + '_' + k.killer_puuid;
+      enemyKillCount[key] = (enemyKillCount[key] || 0) + 1;
+    }
+    (k.assistants || []).forEach(a => {
+      const key = rnd + '_' + a.assistant_puuid;
+      assistsByRoundPlayer[key] = (assistsByRoundPlayer[key] || 0) + 1;
+    });
+  });
+
+  roundsArr.forEach((r, i) => {
+    const roundNum = i + 1;
+    const atkTeam = attackerForRound(roundNum, half1Attacker, r);
+
+    const dmgReceivedThisRound = {};
+    (r.player_stats || []).forEach(ps => {
+      const dealer = ps.player_puuid;
+      (ps.damage_events || []).forEach(de => {
+        if (de.receiver_puuid === dealer) return;
+        dmgReceivedThisRound[de.receiver_puuid] = (dmgReceivedThisRound[de.receiver_puuid] || 0) + de.damage;
+      });
+    });
+
+    (r.player_stats || []).forEach(ps => {
+      const pid = ps.player_puuid;
+      if (!playersMeta[pid]) return;
+      const team = playersMeta[pid].team;
+      const side = team === atkTeam ? 'attack' : 'defense';
+      const s = sideStats[pid][side];
+      s.rounds += 1;
+      s.kills += killsArr.length ? (enemyKillCount[i + '_' + pid] || 0) : (ps.kills || 0);
+      s.score += ps.score || 0;
+      s.damage_made += ps.damage || 0;
+      s.damage_received += dmgReceivedThisRound[pid] || 0;
+      s.headshots += ps.headshots || 0;
+      s.bodyshots += ps.bodyshots || 0;
+      s.legshots += ps.legshots || 0;
+      s.assists += assistsByRoundPlayer[i + '_' + pid] || 0;
+    });
+
+    const killsThisRound = killsByRound[i] || [];
+    killsThisRound.forEach(k => {
+      const vpid = k.victim_puuid;
+      if (playersMeta[vpid]) {
+        const team = playersMeta[vpid].team;
+        const side = team === atkTeam ? 'attack' : 'defense';
+        sideStats[vpid][side].deaths += 1;
+      }
+    });
+    const enemyKillsThisRound = killsThisRound.filter(isEnemyKill);
+    if (enemyKillsThisRound.length) {
+      const first = [...enemyKillsThisRound].sort((a, b) => a.kill_time_in_round - b.kill_time_in_round)[0];
+      const kpid = first.killer_puuid, vpid = first.victim_puuid;
+      if (playersMeta[kpid]) {
+        const team = playersMeta[kpid].team;
+        const side = team === atkTeam ? 'attack' : 'defense';
+        sideStats[kpid][side].fk += 1;
+      }
+      if (playersMeta[vpid]) {
+        const team = playersMeta[vpid].team;
+        const side = team === atkTeam ? 'attack' : 'defense';
+        sideStats[vpid][side].fd += 1;
+      }
+    }
+  });
+
+  const teams = m.teams || {};
+  const blueWon = !!(teams.blue && teams.blue.has_won);
+  const redWon = !!(teams.red && teams.red.has_won);
+  let winningTeam = null;
+  if (blueWon && !redWon) winningTeam = 'Blue';
+  else if (redWon && !blueWon) winningTeam = 'Red';
+  else if (teams.blue && teams.red) {
+    winningTeam = (teams.blue.rounds_won || 0) >= (teams.red.rounds_won || 0) ? 'Blue' : 'Red';
+  }
+
+  const positions = {};
+  Object.keys(playersMeta).forEach(pid => { positions[pid] = { kills: [], deaths: [] }; });
+  const roundAttackerMap = {};
+  roundsArr.forEach((r, i) => { roundAttackerMap[i] = attackerForRound(i + 1, half1Attacker, r); });
+
+  killsArr.forEach(k => {
+    const killerPid = k.killer_puuid, victimPid = k.victim_puuid;
+    let killerLoc = null;
+    (k.player_locations_on_kill || []).forEach(loc => {
+      if (loc.player_puuid === killerPid) killerLoc = loc.location;
+    });
+    const deathLoc = k.victim_death_location;
+    const atkTeam = roundAttackerMap[k.round];
+    if (killerLoc && positions[killerPid] && isEnemyKill(k)) {
+      const killerTeam = playersMeta[killerPid] && playersMeta[killerPid].team;
+      positions[killerPid].kills.push({
+        x: killerLoc.x, y: killerLoc.y, round: k.round, t: k.kill_time_in_round,
+        weapon: k.damage_weapon_name, victim: k.victim_display_name,
+        enemyX: deathLoc ? deathLoc.x : null, enemyY: deathLoc ? deathLoc.y : null,
+        side: killerTeam === atkTeam ? 'attack' : 'defense',
+      });
+    }
+    if (deathLoc && positions[victimPid]) {
+      const victimTeam = playersMeta[victimPid] && playersMeta[victimPid].team;
+      positions[victimPid].deaths.push({
+        x: deathLoc.x, y: deathLoc.y, round: k.round, t: k.kill_time_in_round,
+        weapon: k.damage_weapon_name, killer: k.killer_display_name,
+        enemyX: killerLoc ? killerLoc.x : null, enemyY: killerLoc ? killerLoc.y : null,
+        side: victimTeam === atkTeam ? 'attack' : 'defense',
+      });
+    }
+  });
+
+  const players = Object.keys(playersMeta).map(pid => {
+    const meta = playersMeta[pid];
+    const entry = { ...meta };
+    const raw = { rounds: 0, kills: 0, deaths: 0, assists: 0, score: 0, damage_made: 0, damage_received: 0,
+                   headshots: 0, bodyshots: 0, legshots: 0, fk: 0, fd: 0 };
+    ['attack', 'defense'].forEach(side => {
+      const s = sideStats[pid][side];
+      Object.keys(raw).forEach(k => { raw[k] += s[k]; });
+      const totalShots = s.headshots + s.bodyshots + s.legshots;
+      const hsPct = totalShots ? Math.round((100 * s.headshots / totalShots) * 10) / 10 : 0;
+      const rounds = s.rounds || 1;
+      entry[side] = {
+        rounds: s.rounds, kills: s.kills, deaths: s.deaths, assists: s.assists,
+        kd: s.deaths ? Math.round((s.kills / s.deaths) * 100) / 100 : s.kills,
+        adr: Math.round((s.damage_made / rounds) * 10) / 10,
+        damage_made: s.damage_made,
+        damage_received: s.damage_received,
+        acs: Math.round((s.score / rounds) * 10) / 10,
+        hs_pct: hsPct,
+        fk: s.fk, fd: s.fd,
+      };
+    });
+    entry.raw = raw;
+    entry.rawSide = { attack: { ...sideStats[pid].attack }, defense: { ...sideStats[pid].defense } };
+    entry.won = meta.team === winningTeam;
+    entry.positions = positions[pid];
+    return entry;
+  });
+
+  const siteStats = {};
+  const byTeamSite = {};
+  roundsArr.forEach((r, i) => {
+    const roundNum = i + 1;
+    const atk = attackerForRound(roundNum, half1Attacker, r);
+    const site = (r.plant_events && r.plant_events.plant_site) || 'None';
+    const win = r.winning_team;
+    const atkWin = win === atk ? 1 : 0;
+    if (!siteStats[site]) siteStats[site] = { rounds: 0, atkWin: 0 };
+    siteStats[site].rounds += 1;
+    siteStats[site].atkWin += atkWin;
+    const key = atk + '_' + site;
+    if (!byTeamSite[key]) byTeamSite[key] = { rounds: 0, wins: 0 };
+    byTeamSite[key].rounds += 1;
+    byTeamSite[key].wins += atkWin;
+  });
+
+  const siteOverall = {};
+  Object.entries(siteStats).forEach(([site, s]) => {
+    siteOverall[site] = {
+      rounds: s.rounds,
+      attacker_wins: s.atkWin,
+      attacker_win_rate: s.rounds ? Math.round((100 * s.atkWin / s.rounds) * 10) / 10 : 0,
+    };
+  });
+  const siteByTeam = {};
+  Object.entries(byTeamSite).forEach(([key, s]) => {
+    siteByTeam[key] = { rounds: s.rounds, wins: s.wins, win_rate: s.rounds ? Math.round((100 * s.wins / s.rounds) * 10) / 10 : 0 };
+  });
+
+  const roundTypeBreakdown = computeRoundTypeBreakdown(roundsArr);
+  const postPlant = computePostPlantData(roundsArr, playersMeta);
+
+  return {
+    map: (m.metadata && m.metadata.map) || '不明',
+    mode: (m.metadata && m.metadata.mode) || '不明',
+    modeId: (m.metadata && m.metadata.mode_id) || null,
+    matchId: (m.metadata && m.metadata.matchid) || null,
+    gameStart: (m.metadata && m.metadata.game_start_patched) || null,
+    gameStartTs: normalizeTs(m.metadata && m.metadata.game_start),
+    rounds_played: roundsPlayed,
+    teams: { blue: teams.blue || { rounds_won: 0 }, red: teams.red || { rounds_won: 0 } },
+    winningTeam,
+    players,
+    site_breakdown: { overall: siteOverall, by_team: siteByTeam },
+    round_type_breakdown: roundTypeBreakdown,
+    post_plant: postPlant,
+  };
+}
+
+function combineTotal(p) {
+  const a = p.attack, d = p.defense;
+  const kills = a.kills + d.kills, deaths = a.deaths + d.deaths, assists = a.assists + d.assists;
+  const rounds = a.rounds + d.rounds;
+  const damage_made = a.damage_made + d.damage_made;
+  const damage_received = a.damage_received + d.damage_received;
+  return {
+    rounds, kills, deaths, assists,
+    kd: deaths ? Math.round((kills / deaths) * 100) / 100 : kills,
+    adr: Math.round((damage_made / (rounds || 1)) * 10) / 10,
+    damage_made, damage_received,
+    acs: Math.round(((a.acs * a.rounds + d.acs * d.rounds) / (rounds || 1)) * 10) / 10,
+    hs_pct: Math.round(((a.hs_pct * a.rounds + d.hs_pct * d.rounds) / (rounds || 1)) * 10) / 10,
+    fk: a.fk + d.fk,
+    fd: a.fd + d.fd,
+  };
+}
+
+function getSideData(p, side) {
+  if (side === 'total') return combineTotal(p);
+  return p[side];
+}
+
+function sortPlayers(players, team, side, key, dir) {
+  return players
+    .filter(p => p.team === team)
+    .map(p => ({ meta: p, s: getSideData(p, side) }))
+    .sort((a, b) => (dir === 'desc' ? b.s[key] - a.s[key] : a.s[key] - b.s[key]));
+}
+
+// ---------- Aggregate (multi-match) computation ----------
+
+function buildAggregate(matches) {
+  const agg = {}; // puuid -> accumulator
+  matches.forEach(match => {
+    match.dashboard.players.forEach(p => {
+      if (!agg[p.puuid]) {
+        agg[p.puuid] = {
+          puuid: p.puuid, name: p.name, tag: p.tag, characters: {},
+          matches: 0, wins: 0,
+          rounds: 0, kills: 0, deaths: 0, assists: 0, score: 0,
+          damage_made: 0, damage_received: 0, headshots: 0, bodyshots: 0, legshots: 0,
+          fk: 0, fd: 0,
+        };
+      }
+      const a = agg[p.puuid];
+      a.name = p.name; a.tag = p.tag; // keep most recent naming
+      a.characters[p.character] = (a.characters[p.character] || 0) + 1;
+      a.matches += 1;
+      if (p.won) a.wins += 1;
+      const r = p.raw;
+      a.rounds += r.rounds; a.kills += r.kills; a.deaths += r.deaths; a.assists += r.assists;
+      a.score += r.score; a.damage_made += r.damage_made; a.damage_received += r.damage_received;
+      a.headshots += r.headshots; a.bodyshots += r.bodyshots; a.legshots += r.legshots;
+      a.fk += r.fk; a.fd += r.fd;
+    });
+  });
+
+  return Object.values(agg).map(a => {
+    const totalShots = a.headshots + a.bodyshots + a.legshots;
+    const mainChar = Object.entries(a.characters).sort((x, y) => y[1] - x[1])[0];
+    return {
+      puuid: a.puuid, name: a.name, tag: a.tag,
+      mainCharacter: mainChar ? mainChar[0] : '-',
+      matches: a.matches,
+      win_rate: a.matches ? Math.round((100 * a.wins / a.matches) * 10) / 10 : 0,
+      wins: a.wins,
+      kills: a.kills, deaths: a.deaths, assists: a.assists,
+      kd: a.deaths ? Math.round((a.kills / a.deaths) * 100) / 100 : a.kills,
+      adr: Math.round((a.damage_made / (a.rounds || 1)) * 10) / 10,
+      acs: Math.round((a.score / (a.rounds || 1)) * 10) / 10,
+      hs_pct: totalShots ? Math.round((100 * a.headshots / totalShots) * 10) / 10 : 0,
+      fk: a.fk, fd: a.fd,
+      damage_made: a.damage_made, damage_received: a.damage_received,
+    };
+  });
+}
+
+function buildAggregateRoundTypes(matches) {
+  const overall = {};
+  ROUND_TYPE_ORDER.forEach(t => { overall[t] = { rounds: 0, wins: 0 }; });
+  matches.forEach(match => {
+    const rtb = match.dashboard.round_type_breakdown;
+    if (!rtb) return;
+    Object.entries(rtb.overall).forEach(([type, s]) => {
+      if (!overall[type]) overall[type] = { rounds: 0, wins: 0 };
+      overall[type].rounds += s.rounds;
+      overall[type].wins += s.wins;
+    });
+  });
+  const out = {};
+  Object.entries(overall).forEach(([type, s]) => {
+    out[type] = { rounds: s.rounds, wins: s.wins, win_rate: s.rounds ? Math.round((100 * s.wins / s.rounds) * 10) / 10 : 0 };
+  });
+  return out;
+}
+
+// ---------- UI pieces ----------
+
+function SiteBar({ label, rounds, rate, accent }) {
+  return (
+    <div style={{ marginBottom: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+        <span style={{ color: '#C7D0D8', fontWeight: 600 }}>
+          {label} <span style={{ color: '#5A6570', fontWeight: 500 }}>({rounds}R)</span>
+        </span>
+        <span style={{ color: accent, fontWeight: 700 }}>{rate}%</span>
+      </div>
+      <div style={{ width: '100%', height: '8px', borderRadius: '4px', background: '#161B21', overflow: 'hidden' }}>
+        <div style={{ width: `${rate}%`, height: '100%', background: accent, borderRadius: '4px' }} />
+      </div>
+    </div>
+  );
+}
+
+// ---------- Game mode helpers ----------
+
+const MODE_LABEL_JA = {
+  competitive: 'コンペティティブ', custom: 'カスタム', unrated: 'アンレート',
+  swiftplay: 'スウィフトプレイ', spikerush: 'スパイクラッシュ', deathmatch: 'デスマッチ',
+  teamdeathmatch: 'チームデスマッチ', escalation: 'エスカレーション', replication: 'レプリケーション',
+  snowballfight: 'スノーボールファイト', newmap: 'ニューマップ', premier: 'プレミア',
+};
+
+function modeKeyOf(match) {
+  const d = match.dashboard;
+  const raw = (d.modeId || d.mode || 'unknown');
+  return String(raw).toLowerCase().replace(/[\s_-]+/g, '').replace(/game$/, '');
+}
+
+function modeLabelOf(match) {
+  const key = modeKeyOf(match);
+  return MODE_LABEL_JA[key] || match.dashboard.mode || '不明';
+}
+
+function RoundTypeCard({ breakdown, title }) {
+  return (
+    <div style={{ flex: '1 1 320px', border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' }}>
+      <div style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '12px' }}>
+        {title}
+      </div>
+      {ROUND_TYPE_ORDER.map((type, idx) => {
+        const s = breakdown[type];
+        if (!s || !s.rounds) return null;
+        const palette = ['#9B8CFF', '#FF6B6B', '#F5A623', '#4ADE80', '#5CC8FF'];
+        const accent = palette[idx % palette.length];
+        return <SiteBar key={type} label={ROUND_TYPE_LABEL_JA[type]} rounds={s.rounds} rate={s.win_rate} accent={accent} />;
+      })}
+      <p style={{ fontSize: '11px', color: '#5A6570', marginTop: '10px', marginBottom: 0 }}>
+        判定基準：1R・13Rはピストル / それ以外はチーム平均ロードアウト額で判定（&lt;2000: エコ、2000〜3400未満: フォース、3400以上: フルバイ）/ 自分がフルバイかつ相手がエコの場合はアンチエコとして別集計
+      </p>
+    </div>
+  );
+}
+
+// チーム別のラウンドタイプ勝率（Red / Blue × ピストル・エコ・フォース・フルバイ・アンチエコ）
+function RoundTypeTeamCard({ byTeam }) {
+  const types = ROUND_TYPE_ORDER.filter(t => ['Red', 'Blue'].some(team => byTeam[`${team}_${t}`] && byTeam[`${team}_${t}`].rounds));
+  const rateColor = (r) => r > 50 ? '#4ADE80' : r < 50 ? '#FF6B6B' : '#C7D0D8';
+  return (
+    <div style={{ flex: '1 1 420px', border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' }}>
+      <div style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '12px' }}>
+        チーム別
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #1E262E' }}>
+              <th style={{ textAlign: 'left', padding: '4px 8px', color: '#6B7885', fontSize: '11px', textTransform: 'uppercase' }}>チーム</th>
+              {types.map(t => (
+                <th key={t} style={{ textAlign: 'center', padding: '4px 8px', color: '#6B7885', fontSize: '11px', whiteSpace: 'nowrap' }}>{ROUND_TYPE_LABEL_JA[t]}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {['Red', 'Blue'].map(team => (
+              <tr key={team} style={{ borderBottom: '1px solid #161B21' }}>
+                <td style={{ padding: '8px', fontWeight: 700, color: TEAM_COLOR[team] }}>{team}</td>
+                {types.map(t => {
+                  const s = byTeam[`${team}_${t}`];
+                  return (
+                    <td key={t} style={{ padding: '8px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      {s && s.rounds ? (
+                        <React.Fragment>
+                          <div style={{ fontWeight: 700, color: rateColor(s.win_rate) }}>{s.win_rate}%</div>
+                          <div style={{ fontSize: '11px', color: '#5A6570' }}>{s.wins}/{s.rounds}R</div>
+                        </React.Fragment>
+                      ) : <span style={{ color: '#3A444E' }}>{'\u2014'}</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ fontSize: '11px', color: '#5A6570', marginTop: '10px', marginBottom: 0 }}>
+        各チームがそのタイプのラウンドで勝った割合です（勝利数/ラウンド数）。同じラウンドでも、チームごとに平均ロードアウト額で別々に判定するため、一方がエコのとき相手はフルバイ（アンチエコ）になります
+      </p>
+    </div>
+  );
+}
+
+function PostPlantCard({ postPlant }) {
+  const bd = postPlant.bandDistribution;
+  const palette = { Close: '#FF6B6B', Mid: '#F5A623', Far: '#5CC8FF' };
+  const totalDefenderInstances = DIST_BAND_ORDER.reduce((s, b) => s + bd[b].count, 0);
+  const cc = postPlant.closeCompare;
+  return (
+    <div style={{ flex: '1 1 320px', border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' }}>
+      <div style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '12px' }}>
+        防衛側の位置分布（プラント時点、{postPlant.roundsWithPlant}ラウンド・延べ{totalDefenderInstances}人）
+      </div>
+      {DIST_BAND_ORDER.map(b => (
+        <SiteBar key={b} label={DIST_BAND_LABEL_JA[b]} rounds={bd[b].count} rate={bd[b].share} accent={palette[b]} />
+      ))}
+      <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid #1E262E' }}>
+        <div style={{ fontSize: '11px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '8px' }}>
+          クロース圏内の防衛側人数 別・攻撃側勝率
+        </div>
+        <div style={{ display: 'flex', gap: '16px' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '11px', color: '#6B7885' }}>1人以上いた（{cc.present.rounds}R）</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: '#EDEFF2' }}>{cc.present.win_rate}%</div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '11px', color: '#6B7885' }}>0人だった（{cc.absent.rounds}R）</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: '#EDEFF2' }}>{cc.absent.win_rate}%</div>
+          </div>
+        </div>
+      </div>
+      <p style={{ fontSize: '11px', color: '#5A6570', marginTop: '12px', marginBottom: 0 }}>
+        判定基準：プラント地点からの直線距離で分類（クロース：&lt;2500、ミッド：2500〜5000未満、ファー：5000以上、ゲーム内単位）。生存していたプレイヤーのみ集計対象。
+      </p>
+    </div>
+  );
+}
+
+// ---------- Kill/Death position map (uses official valorant-api.com map transform) ----------
+
+// projectToNorm: converts in-game x/y to normalized 0..1 minimap coordinates using
+// Riot's own per-map transform (xMultiplier/yMultiplier/xScalarToAdd/yScalarToAdd),
+// the same formula documented for their official minimap texture.
+function projectToNorm(x, y, meta) {
+  const normX = meta.xMultiplier * y + meta.xScalarToAdd;
+  const normY = meta.yMultiplier * x + meta.yScalarToAdd;
+  return [normX, normY];
+}
+
+function heatColor(t) {
+  const stops = [
+    [0.0, [40, 60, 220]],
+    [0.35, [0, 220, 220]],
+    [0.65, [255, 220, 0]],
+    [1.0, [255, 40, 40]],
+  ];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [t0, c0] = stops[i], [t1, c1] = stops[i + 1];
+    if (t >= t0 && t <= t1) {
+      const f = (t - t0) / (t1 - t0 || 1);
+      return [
+        Math.round(c0[0] + (c1[0] - c0[0]) * f),
+        Math.round(c0[1] + (c1[1] - c0[1]) * f),
+        Math.round(c0[2] + (c1[2] - c0[2]) * f),
+      ];
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+function drawHeatmap(canvas, normPoints) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!normPoints.length) return;
+
+  ctx.globalCompositeOperation = 'lighter';
+  const radius = Math.max(W, H) * 0.055;
+  normPoints.forEach(([nx, ny]) => {
+    const cx = nx * W, cy = ny * H;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    grad.addColorStop(0, 'rgba(255,255,255,0.35)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalCompositeOperation = 'source-over';
+
+  const imgData = ctx.getImageData(0, 0, W, H);
+  const data = imgData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const v = data[i + 3]; // accumulated alpha = density, since fill color is always pure white
+    if (v < 4) { data[i + 3] = 0; continue; }
+    const t = Math.min(1, v / 130);
+    const [r, g, b] = heatColor(t);
+    data[i] = r; data[i + 1] = g; data[i + 2] = b;
+    data[i + 3] = Math.min(230, Math.round(40 + v * 1.5));
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function HeatmapCanvas({ points }) {
+  const canvasRef = useRef(null);
+  React.useEffect(() => {
+    if (canvasRef.current) drawHeatmap(canvasRef.current, points);
+  }, [JSON.stringify(points)]);
+  return (
+    <canvas
+      ref={canvasRef}
+      width={400}
+      height={400}
+      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+    />
+  );
+}
+
+// ---------- ラウンド内の時間帯（30秒区切り）----------
+
+const TIME_BIN_MS = 30000;
+
+function fmtRoundTime(ms) {
+  const sec = Math.floor(ms / 1000);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+// 30秒ごとのキル数・デス数の棒グラフ。棒（時間帯）をクリックすると絞り込みの切り替え
+function TimeBinChart({ kills, deaths, nBins, selected, onToggle }) {
+  const binOf = (t) => Math.min(nBins - 1, Math.floor(t / TIME_BIN_MS));
+  const kc = new Array(nBins).fill(0), dc = new Array(nBins).fill(0);
+  kills.forEach(e => { if (e.t != null) kc[binOf(e.t)] += 1; });
+  deaths.forEach(e => { if (e.t != null) dc[binOf(e.t)] += 1; });
+
+  const W = 360, H = 250, pad = { l: 30, r: 10, t: 18, b: 44 };
+  const maxC = Math.max(1, ...kc, ...dc);
+  const step = Math.max(1, Math.ceil(maxC / 4));
+  const top = step * Math.ceil(maxC / step);
+  const ticks = [];
+  for (let v = 0; v <= top; v += step) ticks.push(v);
+  const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+  const gw = plotW / nBins;
+  const bw = Math.min(22, gw * 0.36);
+  const y = (v) => pad.t + plotH * (1 - v / top);
+  const base = pad.t + plotH;
+  const anySel = selected.length > 0;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      {ticks.map(v => (
+        <g key={v}>
+          <line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke="#1E262E" strokeWidth="1" />
+          <text x={pad.l - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill="#6B7885">{v}</text>
+        </g>
+      ))}
+      {Array.from({ length: nBins }, (_, i) => {
+        const gx = pad.l + gw * i, cx = gx + gw / 2;
+        const sel = selected.includes(i);
+        return (
+          <g key={i} onClick={() => onToggle(i)} style={{ cursor: 'pointer' }} opacity={anySel && !sel ? 0.35 : 1}>
+            <title>{`${i * 30}–${(i + 1) * 30}秒: キル ${kc[i]} / デス ${dc[i]}`}</title>
+            <rect x={gx + 2} y={pad.t} width={gw - 4} height={plotH + 26} rx="3" fill={sel ? '#F5A62320' : 'transparent'} />
+            {kc[i] > 0 && <rect x={cx - bw - 1} y={y(kc[i])} width={bw} height={base - y(kc[i])} fill="#4ADE80" rx="2" />}
+            {dc[i] > 0 && <rect x={cx + 1} y={y(dc[i])} width={bw} height={base - y(dc[i])} fill="#FF6B6B" rx="2" />}
+            {kc[i] > 0 && <text x={cx - bw / 2 - 1} y={y(kc[i]) - 4} textAnchor="middle" fontSize="10" fontWeight="700" fill="#4ADE80">{kc[i]}</text>}
+            {dc[i] > 0 && <text x={cx + bw / 2 + 1} y={y(dc[i]) - 4} textAnchor="middle" fontSize="10" fontWeight="700" fill="#FF6B6B">{dc[i]}</text>}
+            <text x={cx} y={base + 15} textAnchor="middle" fontSize="10" fill={sel ? '#F5A623' : '#8B9AA8'} fontWeight={sel ? 700 : 400}>{`${i * 30}–${(i + 1) * 30}`}</text>
+          </g>
+        );
+      })}
+      <line x1={pad.l} x2={W - pad.r} y1={base} y2={base} stroke="#2A333B" strokeWidth="1" />
+      <text x={pad.l + plotW / 2} y={H - 6} textAnchor="middle" fontSize="10" fill="#5A6570">ラウンド開始からの経過時間（秒）</text>
+    </svg>
+  );
+}
+
+function PositionMapView({ dashboard, mapMetaCache, setMapMetaCache }) {
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [showKills, setShowKills] = useState(true);
+  const [showDeaths, setShowDeaths] = useState(true);
+  const [posSide, setPosSide] = useState('total'); // 'total' | 'attack' | 'defense'
+  const [viewMode, setViewMode] = useState('points'); // 'points' | 'heatmap'
+  const [hover, setHover] = useState(null);
+  const [timeSel, setTimeSel] = useState([]); // 選択中の時間帯（30秒区切りのインデックス）。空 = すべて
+
+  const mapName = dashboard.map;
+  const cacheEntry = mapMetaCache[mapName];
+
+  React.useEffect(() => {
+    if (cacheEntry) return;
+    setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'loading' } }));
+    fetch('https://valorant-api.com/v1/maps')
+      .then(res => res.json())
+      .then(json => {
+        const found = (json.data || []).find(m => m.displayName === mapName);
+        if (!found || !found.displayIcon) {
+          setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'error', message: 'マップ画像が見つかりませんでした' } }));
+          return;
+        }
+        setMapMetaCache(prev => ({
+          ...prev,
+          [mapName]: {
+            status: 'ready',
+            displayIcon: found.displayIcon,
+            xMultiplier: found.xMultiplier, yMultiplier: found.yMultiplier,
+            xScalarToAdd: found.xScalarToAdd, yScalarToAdd: found.yScalarToAdd,
+          },
+        }));
+      })
+      .catch(err => {
+        setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'error', message: String(err) } }));
+      });
+  }, [mapName]);
+
+  const players = dashboard.players;
+  const player = players[selectedIdx];
+  const filterBySide = (arr) => posSide === 'total' ? arr : arr.filter(e => e.side === posSide);
+
+  // 時間帯: 試合内の全キル/デスの最大経過時間から、30秒区切りの区間数を決める
+  const allT = [];
+  players.forEach(pl => pl.positions.kills.concat(pl.positions.deaths).forEach(e => { if (e.t != null) allT.push(e.t); }));
+  const hasTime = allT.length > 0;
+  const nBins = hasTime ? Math.min(8, Math.floor(Math.max(...allT) / TIME_BIN_MS) + 1) : 0;
+  const binOf = (t) => Math.min(nBins - 1, Math.floor(t / TIME_BIN_MS));
+  const activeBins = timeSel.filter(i => i < nBins);
+  const timeOk = (e) => !hasTime || activeBins.length === 0 || (e.t != null && activeBins.includes(binOf(e.t)));
+  const filterAll = (arr) => filterBySide(arr).filter(timeOk);
+  const toggleBin = (i) => setTimeSel(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i].sort((a, b) => a - b));
+
+  const filteredKills = player ? filterAll(player.positions.kills) : [];
+  const filteredDeaths = player ? filterAll(player.positions.deaths) : [];
+
+  if (!cacheEntry || cacheEntry.status === 'loading') {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center', color: '#6B7885', fontSize: '13px' }}>
+        マップデータを読み込み中（valorant-api.com）...
+      </div>
+    );
+  }
+  if (cacheEntry.status === 'error') {
+    return (
+      <div style={{ padding: '20px', color: '#FF9B9B', fontSize: '13px' }}>
+        マップデータの取得に失敗しました: {cacheEntry.message}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ minWidth: '220px', flex: '0 0 220px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {players.map((p, idx) => {
+              const isSel = idx === selectedIdx;
+              const color = TEAM_COLOR[p.team];
+              return (
+                <div
+                  key={idx}
+                  onClick={() => setSelectedIdx(idx)}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '9px 12px', borderRadius: '4px', cursor: 'pointer',
+                    border: isSel ? `1px solid ${color}` : '1px solid #1E262E',
+                    background: isSel ? `${color}1A` : '#12171D',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                    <span style={{
+                      fontSize: '14px', fontWeight: 600, color: isSel ? '#FFFFFF' : '#C7D0D8',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '150px'
+                    }}>{p.name}</span>
+                    <span style={{ fontSize: '11px', color: '#6B7885' }}>{p.character}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', fontSize: '12px', fontWeight: 600, flexShrink: 0 }}>
+                    <span style={{ color: '#4ADE80' }}>{filterAll(p.positions.kills).length}K</span>
+                    <span style={{ color: '#FF6B6B' }}>{filterAll(p.positions.deaths).length}D</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ flex: '1 1 480px', minWidth: '320px', maxWidth: '640px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: TEAM_COLOR[player.team], display: 'inline-block' }} />
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#F2F5F7' }}>{player.name}</span>
+              <span style={{ fontSize: '13px', color: '#8B9AA8' }}>#{player.tag}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {['total', 'attack', 'defense'].map(sd => (
+                <div key={sd} onClick={() => setPosSide(sd)} style={{
+                  padding: '6px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                  letterSpacing: '0.02em',
+                  border: `1px solid ${posSide === sd ? SIDE_ACCENT[sd] : '#2A333B'}`,
+                  color: posSide === sd ? SIDE_ACCENT[sd] : '#5A6570',
+                  background: posSide === sd ? `${SIDE_ACCENT[sd]}14` : 'transparent'
+                }}>{SIDE_LABEL[sd]}</div>
+              ))}
+              <div onClick={() => setShowKills(v => !v)} style={{
+                padding: '6px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                border: `1px solid ${showKills ? '#4ADE80' : '#2A333B'}`,
+                color: showKills ? '#4ADE80' : '#5A6570',
+                background: showKills ? '#4ADE8014' : 'transparent'
+              }}>Kills ({filteredKills.length})</div>
+              <div onClick={() => setShowDeaths(v => !v)} style={{
+                padding: '6px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                letterSpacing: '0.04em', textTransform: 'uppercase',
+                border: `1px solid ${showDeaths ? '#FF6B6B' : '#2A333B'}`,
+                color: showDeaths ? '#FF6B6B' : '#5A6570',
+                background: showDeaths ? '#FF6B6B14' : 'transparent'
+              }}>Deaths ({filteredDeaths.length})</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+            {[['points', 'ポイント表示'], ['heatmap', 'ヒートマップ']].map(([k, label]) => (
+              <div key={k} onClick={() => setViewMode(k)} style={{
+                padding: '6px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                letterSpacing: '0.02em',
+                border: `1px solid ${viewMode === k ? '#9B8CFF' : '#2A333B'}`,
+                color: viewMode === k ? '#9B8CFF' : '#5A6570',
+                background: viewMode === k ? '#9B8CFF14' : 'transparent'
+              }}>{label}</div>
+            ))}
+          </div>
+
+          {hasTime && (
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', color: '#6B7885', fontWeight: 700, marginRight: '2px' }}>時間帯</span>
+              {[['all', 'すべて', activeBins.length === 0, () => setTimeSel([])],
+                ...Array.from({ length: nBins }, (_, i) => [i, `${i * 30}–${(i + 1) * 30}秒`, activeBins.includes(i), () => toggleBin(i)])
+              ].map(([k, label, active, onClick]) => (
+                <div key={k} onClick={onClick} style={{
+                  padding: '6px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                  border: `1px solid ${active ? '#F5A623' : '#2A333B'}`,
+                  color: active ? '#F5A623' : '#5A6570',
+                  background: active ? '#F5A62314' : 'transparent', whiteSpace: 'nowrap'
+                }}>{label}</div>
+              ))}
+            </div>
+          )}
+
+          <div style={{
+            position: 'relative', border: '1px solid #1E262E', borderRadius: '6px', overflow: 'hidden',
+            background: '#0D1117', width: '100%', maxWidth: '600px', maxHeight: '70vh',
+            aspectRatio: '1 / 1', margin: '0 auto'
+          }}>
+            <img src={cacheEntry.displayIcon} alt={mapName + ' minimap'} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+
+            {viewMode === 'heatmap' && (
+              <HeatmapCanvas points={[
+                ...(showKills ? filteredKills.map(k => projectToNorm(k.x, k.y, cacheEntry)) : []),
+                ...(showDeaths ? filteredDeaths.map(d => projectToNorm(d.x, d.y, cacheEntry)) : []),
+              ]} />
+            )}
+
+            {viewMode === 'points' && (
+            <svg viewBox="0 0 1 1" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+              {showDeaths && filteredDeaths.map((d, i) => {
+                const [nx, ny] = projectToNorm(d.x, d.y, cacheEntry);
+                const hasEnemy = d.enemyX != null && d.enemyY != null;
+                const [enx, eny] = hasEnemy ? projectToNorm(d.enemyX, d.enemyY, cacheEntry) : [null, null];
+                const r = 0.007;
+                return (
+                  <g key={'d' + i}>
+                    {hasEnemy && <line x1={nx} y1={ny} x2={enx} y2={eny} stroke="#FF3B3B" strokeOpacity="0.4" strokeWidth="0.0015" strokeDasharray="0.006,0.005" />}
+                    {hasEnemy && (
+                      <circle cx={enx} cy={eny} r="0.0055" fill="none" stroke="#8B9AA8" strokeWidth="0.0016"
+                        onMouseEnter={() => setHover({ type: 'death', data: d })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+                    )}
+                    <g onMouseEnter={() => setHover({ type: 'death', data: d })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }}>
+                      <line x1={nx - r} y1={ny - r} x2={nx + r} y2={ny + r} stroke="#FF3B3B" strokeWidth={r * 0.4} strokeLinecap="round" />
+                      <line x1={nx - r} y1={ny + r} x2={nx + r} y2={ny - r} stroke="#FF3B3B" strokeWidth={r * 0.4} strokeLinecap="round" />
+                    </g>
+                  </g>
+                );
+              })}
+              {showKills && filteredKills.map((k, i) => {
+                const [nx, ny] = projectToNorm(k.x, k.y, cacheEntry);
+                const hasEnemy = k.enemyX != null && k.enemyY != null;
+                const [enx, eny] = hasEnemy ? projectToNorm(k.enemyX, k.enemyY, cacheEntry) : [null, null];
+                return (
+                  <g key={'k' + i}>
+                    {hasEnemy && <line x1={nx} y1={ny} x2={enx} y2={eny} stroke="#4ADE80" strokeOpacity="0.4" strokeWidth="0.0015" strokeDasharray="0.006,0.005" />}
+                    {hasEnemy && (
+                      <circle cx={enx} cy={eny} r="0.0055" fill="none" stroke="#8B9AA8" strokeWidth="0.0016"
+                        onMouseEnter={() => setHover({ type: 'kill', data: k })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+                    )}
+                    <circle cx={nx} cy={ny} r="0.006" fill="#4ADE80" fillOpacity="0.9" stroke="#0D1116" strokeWidth="0.0013"
+                      onMouseEnter={() => setHover({ type: 'kill', data: k })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+                  </g>
+                );
+              })}
+            </svg>
+            )}
+
+            {viewMode === 'points' && hover && (
+              <div style={{
+                position: 'absolute', top: '10px', left: '10px',
+                background: '#0D1116EE', border: `1px solid ${hover.type === 'kill' ? '#4ADE80' : '#FF6B6B'}`,
+                borderRadius: '4px', padding: '8px 12px', fontSize: '12px', lineHeight: 1.6, pointerEvents: 'none', maxWidth: '260px'
+              }}>
+                <div style={{ fontWeight: 700, color: hover.type === 'kill' ? '#4ADE80' : '#FF6B6B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {hover.type === 'kill' ? 'Kill' : 'Death'} — Round {hover.data.round + 1}{hover.data.t != null ? ` · ${fmtRoundTime(hover.data.t)}` : ''}
+                </div>
+                <div style={{ color: '#C7D0D8' }}>
+                  {hover.type === 'kill'
+                    ? `${player.name} → ${hover.data.victim} (${hover.data.weapon || '不明'})`
+                    : `${hover.data.killer} → ${player.name} (${hover.data.weapon || '不明'})`}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '20px', marginTop: '10px', fontSize: '12px', color: '#8B9AA8', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#4ADE80', display: 'inline-block' }} />
+              キル位置
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: '#FF3B3B', fontWeight: 900 }}>×</span>
+              デス位置
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', border: '1.5px solid #8B9AA8', display: 'inline-block' }} />
+              敵の位置（点線でリンク）
+            </div>
+          </div>
+          <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '8px' }}>
+            背景はRiot公式ミニマップ（valorant-api.com）で、座標変換も公式の係数を使用しています
+          </p>
+        </div>
+
+        {hasTime && player && (
+          <div style={{ flex: '1 1 300px', minWidth: '280px', maxWidth: '400px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#C7D0D8', marginBottom: '2px' }}>
+              時間帯別 キル / デス（30秒ごと）
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7885', marginBottom: '10px' }}>
+              {player.name} · {SIDE_LABEL[posSide]} · 棒をクリックで時間帯を絞り込み
+            </div>
+            <div style={{ border: '1px solid #1E262E', borderRadius: '6px', padding: '10px 12px' }}>
+              <TimeBinChart
+                kills={filterBySide(player.positions.kills)}
+                deaths={filterBySide(player.positions.deaths)}
+                nBins={nBins} selected={activeBins} onToggle={toggleBin}
+              />
+              <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '12px', color: '#8B9AA8', marginTop: '4px' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '10px', height: '10px', background: '#4ADE80', display: 'inline-block', borderRadius: '2px' }} />キル
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '10px', height: '10px', background: '#FF6B6B', display: 'inline-block', borderRadius: '2px' }} />デス
+                </span>
+              </div>
+            </div>
+            <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '8px', lineHeight: 1.6 }}>
+              ラウンド開始からの経過時間で集計しています。グラフは時間帯の絞り込みに関係なく、全時間帯を表示します（選択中の時間帯は色付き）
+            </p>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+// ---------- プラント後: 人数状況の表示と統計 ----------
+
+function countDiffColor(diff) { return diff > 0 ? '#4ADE80' : diff < 0 ? '#FF6B6B' : '#C7D0D8'; }
+function countDiffLabel(diff) { return diff > 0 ? `人数有利 +${diff}` : diff < 0 ? `人数不利 ${diff}` : '互角'; }
+
+// 生存人数を丸で表示（塗りつぶし = 生存、枠のみ = 死亡）
+function AlivePips({ alive, color, total = 5 }) {
+  return (
+    <span style={{ display: 'inline-flex', gap: '4px', verticalAlign: 'middle' }}>
+      {Array.from({ length: total }, (_, i) => (
+        <span key={i} style={{
+          width: '12px', height: '12px', borderRadius: '50%', display: 'inline-block', boxSizing: 'border-box',
+          background: i < alive ? color : 'transparent', border: `2px solid ${i < alive ? color : '#2A333B'}`,
+        }} />
+      ))}
+    </span>
+  );
+}
+
+// 人数状況の統計（攻撃側の勝率）。表示中のラウンドと同じ人数状況の行を強調する
+function PostPlantCountPanel({ pc, current }) {
+  if (!pc || !pc.rounds) return null;
+  const curKey = current ? `${current.atkAlive}v${current.defAlive}` : null;
+  const card = { border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' };
+  const cap = { fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '12px' };
+  const th = { padding: '4px 8px', color: '#6B7885', fontSize: '11px', fontWeight: 700, whiteSpace: 'nowrap' };
+  const rateColor = (r) => r > 50 ? '#4ADE80' : r < 50 ? '#FF6B6B' : '#C7D0D8';
+  const groups = [['adv', '人数有利（攻撃が多い）', '#4ADE80'], ['even', '互角', '#5CC8FF'], ['dis', '人数不利（攻撃が少ない）', '#FF6B6B']];
+  const cell = (g) => g && g.rounds
+    ? <span><span style={{ color: rateColor(g.win_rate), fontWeight: 700 }}>{g.win_rate}%</span> <span style={{ color: '#5A6570', fontSize: '11px' }}>({g.wins}/{g.rounds})</span></span>
+    : <span style={{ color: '#3A444E' }}>{'\u2014'}</span>;
+
+  return (
+    <div style={{ flex: '1 1 340px', minWidth: '300px', maxWidth: '460px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div style={card}>
+        <div style={cap}>人数差別 攻撃側勝率（{pc.rounds}ラウンド）</div>
+        {groups.map(([k, label, accent]) => (
+          <SiteBar key={k} label={`${label} ${pc.byDiff[k].wins}/${pc.byDiff[k].rounds}`} rounds={pc.byDiff[k].rounds} rate={pc.byDiff[k].win_rate} accent={accent} />
+        ))}
+        <div style={{ fontSize: '12px', color: '#8B9AA8', marginTop: '4px' }}>
+          設置時の平均生存人数：攻撃 <b style={{ color: '#EDEFF2' }}>{pc.avgAtk}</b> / 防衛 <b style={{ color: '#EDEFF2' }}>{pc.avgDef}</b>
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={cap}>人数状況別（攻撃 v 防衛）</div>
+        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #1E262E' }}>
+                <th style={{ ...th, textAlign: 'left' }}>状況</th>
+                <th style={{ ...th, textAlign: 'center' }}>R</th>
+                <th style={{ ...th, textAlign: 'center' }}>攻撃勝</th>
+                <th style={{ ...th, textAlign: 'right' }}>勝率</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pc.byState.map(st => {
+                const isCur = `${st.atk}v${st.def}` === curKey;
+                return (
+                  <tr key={`${st.atk}v${st.def}`} style={{ borderBottom: '1px solid #161B21', background: isCur ? '#9B8CFF14' : 'transparent' }}>
+                    <td style={{ padding: '6px 8px', fontWeight: 700, color: countDiffColor(st.diff), whiteSpace: 'nowrap' }}>
+                      {st.atk} v {st.def}
+                      {isCur && <span style={{ marginLeft: '6px', fontSize: '10px', color: '#9B8CFF' }}>表示中</span>}
+                    </td>
+                    <td style={{ padding: '6px 8px', textAlign: 'center', color: '#C7D0D8' }}>{st.rounds}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'center', color: '#C7D0D8' }}>{st.wins}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: rateColor(st.win_rate) }}>{st.win_rate}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={cap}>攻撃時のチーム別</div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #1E262E' }}>
+                <th style={{ ...th, textAlign: 'left' }}>チーム</th>
+                <th style={{ ...th, textAlign: 'center' }}>R</th>
+                <th style={{ ...th, textAlign: 'center' }}>平均人数</th>
+                <th style={{ ...th, textAlign: 'center' }}>有利</th>
+                <th style={{ ...th, textAlign: 'center' }}>互角</th>
+                <th style={{ ...th, textAlign: 'center' }}>不利</th>
+              </tr>
+            </thead>
+            <tbody>
+              {['Red', 'Blue'].map(team => {
+                const t = pc.byTeam[team];
+                return (
+                  <tr key={team} style={{ borderBottom: '1px solid #161B21' }}>
+                    <td style={{ padding: '8px', fontWeight: 700, color: TEAM_COLOR[team] }}>{team}</td>
+                    {t ? (
+                      <React.Fragment>
+                        <td style={{ padding: '8px', textAlign: 'center', color: '#C7D0D8' }}>{t.rounds}</td>
+                        <td style={{ padding: '8px', textAlign: 'center', color: '#C7D0D8', whiteSpace: 'nowrap' }}>{t.avgAtk} v {t.avgDef}</td>
+                        <td style={{ padding: '8px', textAlign: 'center', whiteSpace: 'nowrap' }}>{cell(t.adv)}</td>
+                        <td style={{ padding: '8px', textAlign: 'center', whiteSpace: 'nowrap' }}>{cell(t.even)}</td>
+                        <td style={{ padding: '8px', textAlign: 'center', whiteSpace: 'nowrap' }}>{cell(t.dis)}</td>
+                      </React.Fragment>
+                    ) : <td colSpan={5} style={{ padding: '8px', color: '#3A444E', textAlign: 'center' }}>{'\u2014'}</td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p style={{ fontSize: '11px', color: '#5A6570', margin: 0, lineHeight: 1.6 }}>
+        人数 = スパイク設置時点で生存していた人数（攻撃側は設置者を含む）。勝率はすべて攻撃側の勝率です。「攻撃時のチーム別」は、そのチームが攻撃側だったラウンドのみを集計しています
+      </p>
+    </div>
+  );
+}
+
+function PostPlantMapView({ dashboard, mapMetaCache, setMapMetaCache }) {
+  const rounds = dashboard.post_plant.perRound
+    .map((r, idx) => (r ? { ...r, roundIdx: idx } : null))
+    .filter(Boolean);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [hover, setHover] = useState(null);
+
+  const mapName = dashboard.map;
+  const cacheEntry = mapMetaCache[mapName];
+
+  React.useEffect(() => {
+    if (cacheEntry) return;
+    setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'loading' } }));
+    fetch('https://valorant-api.com/v1/maps')
+      .then(res => res.json())
+      .then(json => {
+        const found = (json.data || []).find(m => m.displayName === mapName);
+        if (!found || !found.displayIcon) {
+          setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'error', message: 'マップ画像が見つかりませんでした' } }));
+          return;
+        }
+        setMapMetaCache(prev => ({
+          ...prev,
+          [mapName]: {
+            status: 'ready', displayIcon: found.displayIcon,
+            xMultiplier: found.xMultiplier, yMultiplier: found.yMultiplier,
+            xScalarToAdd: found.xScalarToAdd, yScalarToAdd: found.yScalarToAdd,
+          },
+        }));
+      })
+      .catch(err => setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'error', message: String(err) } })));
+  }, [mapName]);
+
+  if (!rounds.length) {
+    return <div style={{ padding: '20px', color: '#6B7885', fontSize: '13px' }}>この試合ではプラント位置データが取得できませんでした。</div>;
+  }
+  if (!cacheEntry || cacheEntry.status === 'loading') {
+    return <div style={{ padding: '40px', textAlign: 'center', color: '#6B7885', fontSize: '13px' }}>マップデータを読み込み中（valorant-api.com）...</div>;
+  }
+  if (cacheEntry.status === 'error') {
+    return <div style={{ padding: '20px', color: '#FF9B9B', fontSize: '13px' }}>マップデータの取得に失敗しました: {cacheEntry.message}</div>;
+  }
+
+  const current = rounds[Math.min(selectedIdx, rounds.length - 1)];
+  const [pnx, pny] = projectToNorm(current.plantLocation.x, current.plantLocation.y, cacheEntry);
+  const scaleFactor = Math.abs(cacheEntry.xMultiplier);
+  const rClose = DIST_BAND_THRESHOLDS.close * scaleFactor;
+  const rMid = DIST_BAND_THRESHOLDS.mid * scaleFactor;
+
+  const BAND_COLOR = { Close: '#FF6B6B', Mid: '#F5A623', Far: '#5CC8FF' };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+        {rounds.map((r, idx) => {
+          const isSel = idx === selectedIdx;
+          return (
+            <div key={idx} onClick={() => setSelectedIdx(idx)} style={{
+              padding: '6px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+              border: `1px solid ${isSel ? '#9B8CFF' : '#2A333B'}`,
+              color: isSel ? '#9B8CFF' : '#8B9AA8',
+              background: isSel ? '#9B8CFF14' : 'transparent'
+            }}>
+              R{r.roundIdx + 1} <span style={{ color: TEAM_COLOR[r.attackTeam], fontWeight: 700 }}>{r.site}</span>
+              <span style={{ marginLeft: '6px', color: countDiffColor(r.atkAlive - r.defAlive), fontWeight: 700 }}>{r.atkAlive}v{r.defAlive}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', fontSize: '13px', color: '#8B9AA8' }}>
+        <span style={{ fontWeight: 700, color: '#F2F5F7' }}>Round {current.roundIdx + 1}</span>
+        <span>{current.site}サイト設置</span>
+        <span style={{ color: TEAM_COLOR[current.attackTeam] }}>攻撃: {current.attackTeam}</span>
+        <span style={{ color: current.winningTeam === current.attackTeam ? '#4ADE80' : '#FF6B6B', fontWeight: 700 }}>
+          {current.winningTeam === current.attackTeam ? '攻撃側の勝ち' : '防衛側の勝ち'}
+        </span>
+      </div>
+
+      {(() => {
+        const defTeam = current.attackTeam === 'Red' ? 'Blue' : 'Red';
+        const diff = current.atkAlive - current.defAlive;
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap', border: '1px solid #1E262E', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px' }}>
+            <div>
+              <div style={{ fontSize: '10px', fontWeight: 700, color: TEAM_COLOR[current.attackTeam], letterSpacing: '0.08em', marginBottom: '4px' }}>攻撃 · {current.attackTeam}</div>
+              <AlivePips alive={current.atkAlive} color={TEAM_COLOR[current.attackTeam]} />
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: countDiffColor(diff), lineHeight: 1 }}>
+              {current.atkAlive} <span style={{ fontSize: '13px', color: '#6B7885' }}>vs</span> {current.defAlive}
+            </div>
+            <div>
+              <div style={{ fontSize: '10px', fontWeight: 700, color: TEAM_COLOR[defTeam], letterSpacing: '0.08em', marginBottom: '4px' }}>防衛 · {defTeam}</div>
+              <AlivePips alive={current.defAlive} color={TEAM_COLOR[defTeam]} />
+            </div>
+            <span style={{
+              padding: '4px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 700,
+              color: countDiffColor(diff), border: `1px solid ${countDiffColor(diff)}`, background: `${countDiffColor(diff)}14`,
+            }}>{countDiffLabel(diff)}</span>
+            {current.plantTime != null && (
+              <span style={{ fontSize: '12px', color: '#8B9AA8' }}>設置 {fmtRoundTime(current.plantTime)}（ラウンド開始から）</span>
+            )}
+          </div>
+        );
+      })()}
+
+      <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ flex: '1 1 480px', minWidth: '300px', maxWidth: '600px' }}>
+      <div style={{
+        position: 'relative', border: '1px solid #1E262E', borderRadius: '6px', overflow: 'hidden',
+        background: '#0D1117', width: '100%', maxWidth: '600px', maxHeight: '70vh',
+        aspectRatio: '1 / 1', margin: '0 auto'
+      }}>
+        <img src={cacheEntry.displayIcon} alt={mapName + ' minimap'} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+        <svg viewBox="0 0 1 1" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+          <circle cx={pnx} cy={pny} r={rMid} fill="none" stroke="#F5A623" strokeOpacity="0.55" strokeWidth="0.0025" strokeDasharray="0.008,0.006" />
+          <circle cx={pnx} cy={pny} r={rClose} fill="none" stroke="#FF6B6B" strokeOpacity="0.65" strokeWidth="0.0025" strokeDasharray="0.008,0.006" />
+          <circle cx={pnx} cy={pny} r="0.012" fill="#FFD166" stroke="#0D1116" strokeWidth="0.002" />
+
+          {current.attackers.map((a, i) => {
+            const [nx, ny] = projectToNorm(a.x, a.y, cacheEntry);
+            return (
+              <circle key={'a' + i} cx={nx} cy={ny} r="0.007" fill="none" stroke={TEAM_COLOR[a.team]} strokeWidth="0.0022" fillOpacity="0"
+                onMouseEnter={() => setHover(a)} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+            );
+          })}
+          {current.defenders.map((d, i) => {
+            const [nx, ny] = projectToNorm(d.x, d.y, cacheEntry);
+            return (
+              <circle key={'d' + i} cx={nx} cy={ny} r="0.008" fill={BAND_COLOR[d.band]} fillOpacity="0.9" stroke="#0D1116" strokeWidth="0.0015"
+                onMouseEnter={() => setHover(d)} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+            );
+          })}
+        </svg>
+
+        {hover && (
+          <div style={{
+            position: 'absolute', top: '10px', left: '10px',
+            background: '#0D1116EE', border: `1px solid ${hover.team ? TEAM_COLOR[hover.team] : '#8B9AA8'}`,
+            borderRadius: '4px', padding: '8px 12px', fontSize: '12px', lineHeight: 1.6, pointerEvents: 'none', maxWidth: '260px'
+          }}>
+            <div style={{ fontWeight: 700, color: TEAM_COLOR[hover.team], textTransform: 'uppercase' }}>{hover.name}</div>
+            <div style={{ color: '#C7D0D8' }}>
+              プラント地点から {hover.dist}（{hover.band === 'Close' ? 'クロース' : hover.band === 'Mid' ? 'ミッド' : 'ファー'}）
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: '18px', marginTop: '10px', fontSize: '12px', color: '#8B9AA8', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#FFD166', display: 'inline-block' }} />
+          プラント地点
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '10px', height: '10px', borderRadius: '50%', border: '2px solid #FF6B6B', display: 'inline-block' }} />
+          クロース圏
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '10px', height: '10px', borderRadius: '50%', border: '2px solid #F5A623', display: 'inline-block' }} />
+          ミッド圏（この外側はファー）
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '10px', height: '10px', borderRadius: '50%', border: '2px solid #8B9AA8', display: 'inline-block' }} />
+          攻撃側（枠のみ）/ 塗りつぶし=防衛側（帯の色）
+        </div>
+      </div>
+      <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '8px' }}>
+        位置はプラント時点で生存していたプレイヤーのみ記録されています。
+      </p>
+      </div>
+
+      <PostPlantCountPanel pc={dashboard.post_plant.playerCount} current={current} />
+      </div>
+    </div>
+  );
+}
+
+function UploadScreen({ onFiles, error, hasExisting, onCancel, onFetchApi, apiLoading }) {
+  const [authed, setAuthed] = useState(false);
+  const [inputPass, setInputPass] = useState('');
+  const [authErr, setAuthErr] = useState('');
+
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef(null);
+  const [riotName, setRiotName] = useState('');
+  const [riotTag, setRiotTag] = useState('');
+  const [region, setRegion] = useState('ap');
+  const [apiKey, setApiKey] = useState('');
+  const [size, setSize] = useState(5);
+  const [mode, setMode] = useState('');
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) onFiles(files);
+  }, [onFiles]);
+
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '4px',
+    border: '1px solid #2A333B', background: '#12171D', color: '#EDEFF2', fontSize: '13px',
+    fontFamily: 'inherit',
+  };
+  const labelStyle = { fontSize: '11px', color: '#6B7885', fontWeight: 600, marginBottom: '4px', display: 'block', textAlign: 'left' };
+
+  const canSubmit = riotName.trim() && (riotTag.trim() || riotName.includes('#')) && !apiLoading;
+
+  if (!authed) {
+    return (
+      <div style={{
+        fontFamily: "'Rajdhani', 'Inter', system-ui, sans-serif",
+        background: 'radial-gradient(circle at 20% 0%, #10151d 0%, #0a0d12 55%, #07090c 100%)',
+        color: '#E8ECEF', minHeight: '100vh', boxSizing: 'border-box',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px'
+      }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+        `}</style>
+        <div style={{ maxWidth: '400px', width: '100%', textAlign: 'center', background: '#12171D', border: '1px solid #1E262E', borderRadius: '10px', padding: '30px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: '#9B8CFF', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Admin Authentication</div>
+          <h2 style={{ fontSize: '20px', fontWeight: 700, margin: '0 0 20px 0', color: '#F2F5F7' }}>管理者パスワードを入力</h2>
+          <input
+            type="password"
+            style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: '4px', border: '1px solid #2A333B', background: '#0a0d12', color: '#EDEFF2', fontSize: '14px', marginBottom: '12px' }}
+            placeholder="パスワード"
+            value={inputPass}
+            onChange={e => setInputPass(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                if (inputPass === '0310') setAuthed(true);
+                else setAuthErr('パスワードが違います');
+              }
+            }}
+          />
+          {authErr && <div style={{ color: '#FF9B9B', fontSize: '12px', marginBottom: '10px', textAlign: 'left' }}>{authErr}</div>}
+          <div
+            onClick={() => {
+              if (inputPass === '0310') setAuthed(true);
+              else setAuthErr('パスワードが違います');
+            }}
+            style={{ padding: '10px', borderRadius: '4px', textAlign: 'center', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: '1px solid #9B8CFF', color: '#0a0d12', background: '#9B8CFF', marginBottom: '12px' }}
+          >
+            ログイン
+          </div>
+          {hasExisting && (
+            <div onClick={onCancel} style={{ fontSize: '12px', color: '#8B9AA8', cursor: 'pointer', textDecoration: 'underline' }}>
+              キャンセルしてダッシュボードに戻る
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      fontFamily: "'Rajdhani', 'Inter', system-ui, sans-serif",
+      background: 'radial-gradient(circle at 20% 0%, #10151d 0%, #0a0d12 55%, #07090c 100%)',
+      color: '#E8ECEF', minHeight: '100%', boxSizing: 'border-box',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px'
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+      `}</style>
+      <div style={{ maxWidth: '540px', width: '100%', textAlign: 'center' }}>
+        <div style={{
+          fontSize: '13px', fontWeight: 700, color: '#9B8CFF', letterSpacing: '0.1em',
+          textTransform: 'uppercase', marginBottom: '8px'
+        }}>Valorant Match Dashboard - 管理者ページ</div>
+        <h1 style={{ fontSize: '26px', fontWeight: 700, margin: '0 0 24px 0', color: '#F2F5F7' }}>
+          試合データ（JSON）の追加・管理
+        </h1>
+
+        <div
+          onClick={() => inputRef.current && inputRef.current.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          style={{
+            border: `2px dashed ${dragOver ? '#9B8CFF' : '#2A333B'}`,
+            borderRadius: '10px',
+            padding: '48px 24px',
+            cursor: 'pointer',
+            background: dragOver ? '#9B8CFF0D' : '#12171D',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <div style={{ fontSize: '15px', fontWeight: 600, color: '#EDEFF2', marginBottom: '6px' }}>
+            クリックして選択、またはドラッグ＆ドロップ
+          </div>
+          <div style={{ fontSize: '12px', color: '#6B7885' }}>
+            .json ファイルを複数選択可能（個別の試合データ、またはエクスポート済みのまとめファイル）
+          </div>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="application/json,.json"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => { const files = Array.from(e.target.files || []); if (files.length) onFiles(files); }}
+        />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '22px 0' }}>
+          <div style={{ flex: 1, height: '1px', background: '#1E262E' }} />
+          <span style={{ fontSize: '11px', color: '#5A6570', fontWeight: 700, letterSpacing: '0.05em' }}>または</span>
+          <div style={{ flex: 1, height: '1px', background: '#1E262E' }} />
+        </div>
+
+        <div style={{ border: '1px solid #1E262E', borderRadius: '10px', padding: '20px', background: '#12171D', textAlign: 'left' }}>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#EDEFF2', marginBottom: '4px' }}>
+            HenrikDev APIから直接取得
+          </div>
+          <p style={{ fontSize: '11px', color: '#6B7885', margin: '0 0 14px 0' }}>
+            Riot IDと直近◯試合を指定して、ブラウザから直接試合データを取得します（Pythonスクリプト不要）
+          </p>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+            <div style={{ flex: 2 }}>
+              <label style={labelStyle}>Riot ID（名前）</label>
+              <input style={inputStyle} value={riotName} onChange={e => setRiotName(e.target.value)} placeholder="例: 胡桃麺麭" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>タグ</label>
+              <input style={inputStyle} value={riotTag} onChange={e => setRiotTag(e.target.value)} placeholder="例: kenkk" />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>リージョン</label>
+              <select style={inputStyle} value={region} onChange={e => setRegion(e.target.value)}>
+                <option value="ap">ap（アジア）</option>
+                <option value="na">na（北米）</option>
+                <option value="eu">eu（欧州）</option>
+                <option value="kr">kr（韓国）</option>
+                <option value="latam">latam</option>
+                <option value="br">br（ブラジル）</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>モード</label>
+              <select style={inputStyle} value={mode} onChange={e => setMode(e.target.value)}>
+                <option value="">すべて（指定なし）</option>
+                <option value="custom">カスタム</option>
+                <option value="competitive">コンペティティブ</option>
+                <option value="unrated">アンレート</option>
+                <option value="swiftplay">スウィフトプレイ</option>
+                <option value="spikerush">スパイクラッシュ</option>
+                <option value="deathmatch">デスマッチ</option>
+                <option value="teamdeathmatch">チームデスマッチ</option>
+                <option value="escalation">エスカレーション</option>
+                <option value="replication">レプリケーション</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>取得件数</label>
+              <input style={inputStyle} type="number" min="1" max="10" value={size} onChange={e => setSize(Math.max(1, Math.min(10, Number(e.target.value) || 1)))} />
+            </div>
+          </div>
+          <div style={{ marginBottom: '14px' }}>
+            <label style={labelStyle}>APIキー</label>
+            <input style={inputStyle} type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="HDEV-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+          <div
+            onClick={() => canSubmit && onFetchApi({ name: riotName.trim(), tag: riotTag.trim(), region, apiKey: apiKey.trim(), size, mode })}
+            style={{
+              padding: '10px', borderRadius: '4px', textAlign: 'center', fontSize: '13px', fontWeight: 700,
+              cursor: canSubmit ? 'pointer' : 'not-allowed',
+              border: '1px solid #9B8CFF',
+              color: canSubmit ? '#0a0d12' : '#6B7885',
+              background: canSubmit ? '#9B8CFF' : '#1E262E',
+            }}
+          >
+            {apiLoading ? '取得中...' : '試合データを取得'}
+          </div>
+          <p style={{ fontSize: '10px', color: '#4A545E', marginTop: '10px', marginBottom: 0 }}>
+            APIキーはこのページのメモリ上でのみ保持され、保存や外部送信はされません。ブラウザのCORS制限により取得できない場合は、Pythonスクリプトで取得したJSONファイルをアップロードしてください。
+          </p>
+        </div>
+
+        {error && (
+          <div style={{
+            marginTop: '18px', padding: '12px 16px', borderRadius: '6px',
+            border: '1px solid #FF6B6B55', background: '#FF6B6B12', color: '#FF9B9B',
+            fontSize: '13px', textAlign: 'left'
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div onClick={onCancel} style={{ marginTop: '16px', fontSize: '13px', color: '#9B8CFF', cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}>
+          ← ダッシュボードに戻る
+        </div>
+
+        <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '20px' }}>
+          ファイルはブラウザ内でのみ処理され、外部には送信されません。「エクスポート」で読み込んだ試合をまとめて1ファイルに保存し、次回はそのファイルを読み込むだけで続きから見られます。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Player profile (per PUUID, across matches) ----------
+
+const r1 = (v) => Math.round(v * 10) / 10;
+const r2 = (v) => Math.round(v * 100) / 100;
+const ACC_KEYS = ['rounds', 'kills', 'deaths', 'assists', 'score', 'damage_made', 'damage_received', 'headshots', 'bodyshots', 'legshots', 'fk', 'fd'];
+
+function emptyAcc() {
+  const a = { matches: 0, wins: 0 };
+  ACC_KEYS.forEach(k => { a[k] = 0; });
+  return a;
+}
+function addRaw(acc, r) { ACC_KEYS.forEach(k => { acc[k] += (r && r[k]) || 0; }); }
+function finalizeAcc(a) {
+  const shots = a.headshots + a.bodyshots + a.legshots;
+  return {
+    matches: a.matches, wins: a.wins, losses: a.matches - a.wins,
+    win_rate: a.matches ? r1(100 * a.wins / a.matches) : 0,
+    rounds: a.rounds, kills: a.kills, deaths: a.deaths, assists: a.assists,
+    kd: a.deaths ? r2(a.kills / a.deaths) : a.kills,
+    acs: a.rounds ? r1(a.score / a.rounds) : 0,
+    adr: a.rounds ? r1(a.damage_made / a.rounds) : 0,
+    dpr_received: a.rounds ? r1(a.damage_received / a.rounds) : 0,
+    hs_pct: shots ? r1(100 * a.headshots / shots) : 0,
+    fk: a.fk, fd: a.fd,
+  };
+}
+
+function formatDate(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
+function listPlayers(matches) {
+  const map = {};
+  matches.forEach(m => {
+    m.dashboard.players.forEach(p => {
+      if (!map[p.puuid]) map[p.puuid] = { puuid: p.puuid, name: p.name, tag: p.tag, matches: 0 };
+      map[p.puuid].name = p.name;
+      map[p.puuid].tag = p.tag;
+      map[p.puuid].matches += 1;
+    });
+  });
+  return Object.values(map).sort((a, b) => b.matches - a.matches || String(a.name).localeCompare(String(b.name)));
+}
+
+function buildPlayerProfile(puuid, matches) {
+  const sorted = matches.slice().sort((a, b) => (a.dashboard.gameStartTs || 0) - (b.dashboard.gameStartTs || 0));
+  const total = emptyAcc();
+  const side = { attack: emptyAcc(), defense: emptyAcc() };
+  const byAgent = {}, byMap = {}, names = {};
+  const posByMap = {}; // mapName -> { kills: [], deaths: [] }（全試合分）
+  const history = [];
+  let name = null, tag = null, rank = null;
+
+  sorted.forEach(match => {
+    const d = match.dashboard;
+    const p = d.players.find(x => x.puuid === puuid);
+    if (!p) return;
+    name = p.name; tag = p.tag; if (p.rank) rank = p.rank;
+    names[`${p.name}#${p.tag}`] = true;
+    const won = !!p.won;
+
+    total.matches += 1; if (won) total.wins += 1; addRaw(total, p.raw);
+    ['attack', 'defense'].forEach(sd => { if (p.rawSide && p.rawSide[sd]) addRaw(side[sd], p.rawSide[sd]); });
+
+    const agent = p.character || '不明';
+    if (!byAgent[agent]) byAgent[agent] = emptyAcc();
+    byAgent[agent].matches += 1; if (won) byAgent[agent].wins += 1; addRaw(byAgent[agent], p.raw);
+    const mp = d.map || '不明';
+    if (!byMap[mp]) byMap[mp] = emptyAcc();
+    byMap[mp].matches += 1; if (won) byMap[mp].wins += 1; addRaw(byMap[mp], p.raw);
+    if (!posByMap[mp]) posByMap[mp] = { kills: [], deaths: [] };
+    const tagPos = (e) => ({ ...e, matchId: match.id, ts: d.gameStartTs, agent });
+    ((p.positions && p.positions.kills) || []).forEach(e => posByMap[mp].kills.push(tagPos(e)));
+    ((p.positions && p.positions.deaths) || []).forEach(e => posByMap[mp].deaths.push(tagPos(e)));
+
+    const own = d.teams[String(p.team).toLowerCase()] || {};
+    const opp = d.teams[p.team === 'Blue' ? 'red' : 'blue'] || {};
+    const raw = p.raw;
+    const shots = raw.headshots + raw.bodyshots + raw.legshots;
+    history.push({
+      id: match.id, ts: d.gameStartTs, map: d.map, modeLabel: modeLabelOf(match), agent, team: p.team, won,
+      roundsFor: own.rounds_won || 0, roundsAgainst: opp.rounds_won || 0,
+      kills: raw.kills, deaths: raw.deaths, assists: raw.assists,
+      kd: raw.deaths ? r2(raw.kills / raw.deaths) : raw.kills,
+      acs: raw.rounds ? r1(raw.score / raw.rounds) : 0,
+      adr: raw.rounds ? r1(raw.damage_made / raw.rounds) : 0,
+      hs_pct: shots ? r1(100 * raw.headshots / shots) : 0,
+      fk: raw.fk, fd: raw.fd,
+    });
+  });
+
+  if (!history.length) return null;
+  const fin = (obj) => Object.entries(obj)
+    .map(([label, acc]) => ({ label, ...finalizeAcc(acc) }))
+    .sort((a, b) => b.matches - a.matches || b.acs - a.acs);
+  return {
+    name, tag, rank, aliases: Object.keys(names),
+    total: finalizeAcc(total),
+    side: { attack: finalizeAcc(side.attack), defense: finalizeAcc(side.defense) },
+    agents: fin(byAgent), maps: fin(byMap), history, positionsByMap: posByMap,
+    bestAcs: history.reduce((b, h) => (h.acs > b.acs ? h : b), history[0]),
+    mostKills: history.reduce((b, h) => (h.kills > b.kills ? h : b), history[0]),
+  };
+}
+
+function PlayerLink({ p, onOpen }) {
+  return (
+    <React.Fragment>
+      <span onClick={() => onOpen(p.puuid)} title="個人ページを開く"
+        style={{ cursor: 'pointer', borderBottom: '1px dotted #5A6570' }}>{p.name}</span>
+      <span style={{ color: '#5A6570', fontWeight: 500, fontSize: '11px' }}> #{p.tag}</span>
+    </React.Fragment>
+  );
+}
+
+function TrendChart({ history }) {
+  const values = history.map(h => h.acs);
+  const n = values.length;
+  if (n < 2) {
+    return <p style={{ fontSize: '12px', color: '#6B7885', margin: 0 }}>推移グラフは2試合以上で表示されます。</p>;
+  }
+  const W = 480, H = 140, pad = { l: 36, r: 12, t: 12, b: 22 };
+  const maxV = Math.max(...values, 1) * 1.1;
+  const x = (i) => pad.l + ((W - pad.l - pad.r) * i) / (n - 1);
+  const y = (v) => pad.t + (H - pad.t - pad.b) * (1 - v / maxV);
+  const avg = values.reduce((a, b) => a + b, 0) / n;
+  const pts = values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
+  const ticks = [0, maxV / 2, maxV];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: `${W}px`, height: 'auto', display: 'block' }}>
+      {ticks.map((t, i) => (
+        <g key={i}>
+          <line x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} stroke="#1E262E" strokeWidth="1" />
+          <text x={pad.l - 6} y={y(t) + 4} textAnchor="end" fontSize="10" fill="#6B7885">{Math.round(t)}</text>
+        </g>
+      ))}
+      <line x1={pad.l} x2={W - pad.r} y1={y(avg)} y2={y(avg)} stroke="#9B8CFF" strokeOpacity="0.6" strokeDasharray="5,4" />
+      <text x={W - pad.r} y={y(avg) - 4} textAnchor="end" fontSize="10" fill="#9B8CFF">平均 {r1(avg)}</text>
+      <polyline points={pts} fill="none" stroke="#5CC8FF" strokeWidth="2" />
+      {history.map((h, i) => (
+        <g key={i}>
+          <circle cx={x(i)} cy={y(h.acs)} r="4" fill={h.won ? '#4ADE80' : '#FF6B6B'} stroke="#0a0d12" strokeWidth="1.5">
+            <title>{`${formatDate(h.ts)} ${h.map} ${h.agent}\nACS ${h.acs} / ${h.kills}-${h.deaths}-${h.assists} / ${h.won ? '勝ち' : '負け'}`}</title>
+          </circle>
+          <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="#5A6570">{i + 1}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function ProfileSection({ title, sub, children }) {
+  return (
+    <div style={{ marginBottom: '26px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', borderLeft: '3px solid #9B8CFF', paddingLeft: '10px' }}>
+        <span style={{ fontSize: '15px', fontWeight: 700, color: '#9B8CFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{title}</span>
+        {sub && <span style={{ fontSize: '13px', color: '#6B7885' }}>{sub}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function BreakdownTable({ rows, labelHeader, showMatches }) {
+  const th = { textAlign: 'right', padding: '6px 10px', color: '#6B7885', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', whiteSpace: 'nowrap' };
+  const td = { padding: '9px 10px', textAlign: 'right', color: '#9FA8B0' };
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '640px' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #1E262E' }}>
+            <th style={{ ...th, textAlign: 'left' }}>{labelHeader}</th>
+            {showMatches && <th style={th}>試合</th>}
+            {showMatches && <th style={th}>勝率</th>}
+            <th style={th}>R</th><th style={th}>ACS</th><th style={th}>K/D</th><th style={th}>ADR</th>
+            <th style={th}>HS%</th><th style={th}>FK</th><th style={th}>FD</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderBottom: '1px solid #161B21' }}>
+              <td style={{ ...td, textAlign: 'left', fontWeight: 600, color: '#EDEFF2' }}>{r.label}</td>
+              {showMatches && <td style={td}>{r.matches}</td>}
+              {showMatches && <td style={{ ...td, color: r.win_rate >= 50 ? '#4ADE80' : '#FF6B6B', fontWeight: 600 }}>{r.win_rate}%</td>}
+              <td style={td}>{r.rounds}</td>
+              <td style={{ ...td, color: '#EDEFF2', fontWeight: 700 }}>{r.acs}</td>
+              <td style={{ ...td, color: r.kd >= 1 ? '#4ADE80' : '#FF6B6B', fontWeight: 600 }}>{Number(r.kd).toFixed(2)}</td>
+              <td style={td}>{r.adr}</td>
+              <td style={td}>{r.hs_pct}%</td>
+              <td style={{ ...td, color: '#5CC8FF', fontWeight: 600 }}>{r.fk}</td>
+              <td style={{ ...td, color: '#F5A623', fontWeight: 600 }}>{r.fd}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------- 個人ページ用: 自動アドバイス（ルールベース） ----------
+
+// kind: 'warn' = 改善ポイント / 'good' = 強み / 'info' = 傾向。score は重要度（差の大きさ）で、並び順に使う
+function buildAdvice(profile, me, avg, hasPeers) {
+  const items = [];
+  const add = (kind, title, text, score) => items.push({ kind, title, text, score });
+  const t = profile.total;
+  const f = (v) => r1(v);
+
+  // --- 全体平均との比較（比較対象のプレイヤーが2人以上いるときのみ）---
+  if (me && avg && hasPeers) {
+    const hsR = avg.hs ? me.hs / avg.hs : 1;
+    if (hsR < 0.9) add('warn', 'HS%が全体平均より低め',
+      `HS% は ${f(me.hs)}%（全体平均 ${f(avg.hs)}%）です。クロスエアの位置を常に相手の頭の高さに置くこと、ピークする際にプリエイムを徹底すること、初弾の精度、しゃがみスプレーに依存しないことを意識してみてください。デスマッチや1人でカスタムに入り、マップ別で頭の高さを維持する練習をするのも効果的です。`, Math.min(1, (1 - hsR) * 2));
+    else if (hsR > 1.1) add('good', 'ヘッドショット精度が高い',
+      `HS% は ${f(me.hs)}%（全体平均 ${f(avg.hs)}%）と平均を上回っています。エイムの精度が武器になっているので、自信をもってドライのファイトを積極的に仕掛けることも良い選択肢になります。`, Math.min(1, (hsR - 1) * 2));
+
+    const acsR = avg.acs ? me.acs / avg.acs : 1;
+    if (acsR < 0.92) add('warn', 'ACSが全体平均より低め',
+      `ACS は ${f(me.acs)}（全体平均 ${f(avg.acs)}）です。キル・ダメージ・アシストの総合貢献が平均を下回っています。ロールによっては低くなりがちな数値ですが、味方と近い距離を保ってトレードに参加することで底上げしやすくなります。`, Math.min(1, (1 - acsR) * 2));
+    else if (acsR > 1.08) add('good', 'チームの火力の中心になれている',
+      `ACS は ${f(me.acs)}（全体平均 ${f(avg.acs)}）と平均を上回っています。ラウンドへの貢献度が高く、安定して戦果を出せています。`, Math.min(1, (acsR - 1) * 2));
+
+    const kdR = avg.kd ? me.kd / avg.kd : 1;
+    if (kdR < 0.92) add('warn', 'デスが多め（K/Dが平均以下）',
+      `K/D は ${me.kd.toFixed(2)}（全体平均 ${avg.kd.toFixed(2)}）です。撃ち合いの前に遮蔽物を挟む、1人だけ前に出ず味方がトレードできる距離を保つ、有利なアングルを取れない場面は無理に勝負せず引いて情報を取る、を意識してみてください。`, Math.min(1, (1 - kdR) * 2));
+    else if (kdR > 1.08) add('good', 'K/Dが平均を上回っている',
+      `K/D は ${me.kd.toFixed(2)}（全体平均 ${avg.kd.toFixed(2)}）です。倒す数に対して落ちる数が少なく、撃ち合いの選択が安定しています。`, Math.min(1, (kdR - 1) * 2));
+
+    const adrR = avg.adr ? me.adr / avg.adr : 1;
+    if (adrR < 0.92) add('warn', '与ダメージが少なめ',
+      `ADR は ${f(me.adr)}（全体平均 ${f(avg.adr)}）です。倒し切れなくても相手を削っておくと、味方のトレードが成立しやすくなります。アビリティによるダメージや、撃ち合いで一発入れてから引く動きも取り入れてみてください。`, Math.min(1, (1 - adrR) * 2));
+    else if (adrR > 1.08) add('good', '与ダメージが高い',
+      `ADR は ${f(me.adr)}（全体平均 ${f(avg.adr)}）です。継続的にダメージを出せており、ラウンドを通して相手に圧力をかけられています。`, Math.min(1, (adrR - 1) * 2));
+
+    if (me.dd < avg.dd - 8) add('warn', 'ダメージ収支がマイナス',
+      `1ラウンドあたりのダメージ差は ${me.dd >= 0 ? '+' : ''}${f(me.dd)}（全体平均 ${avg.dd >= 0 ? '+' : ''}${f(avg.dd)}）で、受けるダメージが与えるダメージを上回っています。相手の射線に身をさらす時間を減らす（射線管理を徹底する）、ジグルピークで情報を取る、などで改善できます。`, Math.min(1, (avg.dd - me.dd) / 50));
+    else if (me.dd > avg.dd + 8) add('good', 'ダメージ収支がプラス',
+      `1ラウンドあたりのダメージ差は ${me.dd >= 0 ? '+' : ''}${f(me.dd)}（全体平均 ${avg.dd >= 0 ? '+' : ''}${f(avg.dd)}）です。有利な状況で撃ち合えており、受けるダメージより与えるダメージが上回っています。`, Math.min(1, (me.dd - avg.dd) / 50));
+
+    const rwrGap = me.rwr - avg.rwr;
+    if (rwrGap < -5) {
+      const carry = avg.acs && me.acs >= avg.acs * 1.05;
+      add('warn', 'ラウンド勝率が低め',
+        `ラウンド勝率は ${f(me.rwr)}%（全体平均 ${f(avg.rwr)}%）です。` + (carry
+          ? '個人成績は高いのに勝ちに繋がっていません。味方との連携のためのコールやエコラウンド、ウルトラウンドの判断、人数有利の場面での立ち回りなど、キル以外のマクロ的な勝ち筋を意識してみてください。'
+          : '個人の撃ち合いだけでなく、味方との役割分担やトレードの距離、エコラウンド、ウルトラウンドなど、チームとしての動きも見直してみてください。'),
+        Math.min(1, -rwrGap / 20));
+    } else if (rwrGap > 5) add('good', 'ラウンドを取れている',
+      `ラウンド勝率は ${f(me.rwr)}%（全体平均 ${f(avg.rwr)}%）です。個人の成績だけでなく、チームとしての連携が取れており勝ちに繋がっています。`, Math.min(1, rwrGap / 20));
+  }
+
+  // --- オープニングデュエル ---
+  if (t.matches >= 3) {
+    const perMatch = (t.fk - t.fd) / t.matches;
+    if (perMatch <= -0.7) add('warn', '最初の撃ち合いで落ちやすい',
+      `FK ${t.fk} / FD ${t.fd}（1試合あたり ${f(perMatch)}）と、ラウンド最初の撃ち合いで先に倒される場面が目立ちます。デュエリストであれば、フラッシュなどを味方に要求し合わせて入る。それ以外のロールであれば「リスクをとるべきシチュエーションなのか」を意識して立ち回りを改善することが必要です。`, Math.min(1, -perMatch / 3));
+    else if (perMatch >= 0.7) add('good', '先制キルが多い',
+      `FK ${t.fk} / FD ${t.fd}（1試合あたり +${f(perMatch)}）と、最初の撃ち合いで優位に立てています。味方が続けて入りやすい展開を作れています。`, Math.min(1, perMatch / 3));
+  }
+
+  // --- アタック/ディフェンスの差 ---
+  const atk = profile.side.attack, def = profile.side.defense;
+  if (atk.rounds >= 40 && def.rounds >= 40 && atk.acs > 0 && def.acs > 0) {
+    const sr = atk.acs / def.acs;
+    if (sr < 0.85) add('warn', 'アタック側が弱め',
+      `ACS はアタック ${f(atk.acs)} / ディフェンス ${f(def.acs)} と、アタック側が下がります。攻めでは単独行動を避けて味方との距離感を意識すること、ポストプラントのポジションを事前に決めておく、といった形を固めると安定しやすくなります。`, Math.min(1, (1 - sr) * 2));
+    else if (sr > 1.18) add('warn', 'ディフェンス側が弱め',
+      `ACS はアタック ${f(atk.acs)} / ディフェンス ${f(def.acs)} と、ディフェンス側が下がります。同じ場所で待ちすぎない、情報を取ったら素早くローテーションやプッシュの判断をする、リテイク時は味方と合わせる、といった点を見直してみてください。`, Math.min(1, (sr - 1) * 2));
+  }
+
+  // --- マップ別 ---
+  const mapRows = profile.maps.filter(m => m.matches >= 3);
+  if (mapRows.length) {
+    const worst = mapRows.reduce((b, m) => (m.win_rate < b.win_rate ? m : b), mapRows[0]);
+    const best = mapRows.reduce((b, m) => (m.win_rate > b.win_rate ? m : b), mapRows[0]);
+    if (worst.win_rate <= 40) add('warn', `${worst.label} での勝率が低い`,
+      `${worst.label} は ${worst.matches}試合で勝率 ${f(worst.win_rate)}%（${worst.wins}勝${worst.losses}敗）です。下の「Kill / Death Map」でこのマップを選び、デスが集中している場所や、勝てていないアングルを確認してみてください。`, Math.min(1, (50 - worst.win_rate) / 30));
+    if (best.win_rate >= 65 && best.label !== worst.label) add('good', `${best.label} が得意`,
+      `${best.label} は ${best.matches}試合で勝率 ${f(best.win_rate)}%（${best.wins}勝${best.losses}敗）です。得意マップでの立ち回りを、他のマップにも応用できないか振り返ってみてください。`, Math.min(1, (best.win_rate - 50) / 30));
+  }
+
+  // --- エージェント別 ---
+  const agRows = profile.agents.filter(a => a.matches >= 3);
+  if (agRows.length >= 2 && t.acs > 0) {
+    const bestAg = agRows.reduce((b, a) => (a.acs > b.acs ? a : b), agRows[0]);
+    const worstAg = agRows.reduce((b, a) => (a.acs < b.acs ? a : b), agRows[0]);
+    if (bestAg.acs >= t.acs * 1.1) add('info', `${bestAg.label} で成績が伸びる`,
+      `${bestAg.label} では ${bestAg.matches}試合で ACS ${f(bestAg.acs)}（通算 ${f(t.acs)}）と、通算より高い成績です。選択肢に迷うときの軸にしてみてください。同ロールのエージェントを伸ばしていくのもおすすめです。`, 0.3);
+    if (worstAg.label !== bestAg.label && worstAg.acs <= t.acs * 0.85) add('info', `${worstAg.label} は成績が伸び悩み`,
+      `${worstAg.label} では ${worstAg.matches}試合で ACS ${f(worstAg.acs)}（通算 ${f(t.acs)}）と、通算より低めです。プロの試合を参考に、スキルの使いどころや立ち回りを見直すか、他のエージェント・ロールとの使い分けを検討してみてください。`, 0.3);
+  }
+
+  // --- 直近の調子 ---
+  const hist = profile.history;
+  if (hist.length >= 6) {
+    const k = Math.min(5, Math.floor(hist.length / 2));
+    const recent = hist.slice(-k), before = hist.slice(0, -k);
+    const avgOf = (arr) => arr.reduce((a, h) => a + h.acs, 0) / arr.length;
+    const rA = avgOf(recent), bA = avgOf(before);
+    if (bA > 0) {
+      const tr = rA / bA;
+      if (tr >= 1.12) add('good', '直近の調子が上向き',
+        `直近${k}試合の平均ACSは ${f(rA)} で、それ以前（${f(bA)}）より上がっています。今の感覚や練習内容を続けてみてください。`, Math.min(1, tr - 1));
+      else if (tr <= 0.88) add('warn', '直近の調子が下降気味',
+        `直近${k}試合の平均ACSは ${f(rA)} で、それ以前（${f(bA)}）より下がっています。連戦で疲れていないか、エージェントやプレイスタイルを変えていないかを振り返り、短い休憩やウォームアップを挟んでみてください。`, Math.min(1, 1 - tr));
+    }
+  }
+
+  items.sort((a, b) => b.score - a.score);
+  const pick = (kind, n) => items.filter(i => i.kind === kind).slice(0, n);
+  return [...pick('warn', 6), ...pick('good', 4), ...pick('info', 2)];
+}
+
+function AdviceSection({ profile, matches, puuid }) {
+  const me = radarStats(matches, puuid);
+  const avg = radarStats(matches, null);
+  const peers = new Set();
+  matches.forEach(m => m.dashboard.players.forEach(pl => peers.add(pl.puuid)));
+  const hasPeers = peers.size >= 2;
+  const items = buildAdvice(profile, me, avg, hasPeers);
+
+  const KINDS = {
+    warn: { label: '改善ポイント', color: '#F5A623' },
+    good: { label: '強み', color: '#4ADE80' },
+    info: { label: '傾向', color: '#5CC8FF' },
+  };
+  const notes = [];
+  if (profile.total.matches < 5) notes.push(`試合数が${profile.total.matches}試合と少ないため、参考程度にご覧ください。`);
+  if (!hasPeers) notes.push('比較対象のプレイヤーがいないため、全体平均との比較は行っていません。');
+
+  return (
+    <div>
+      {notes.map((n, i) => <p key={i} style={{ fontSize: '12px', color: '#8B9AA8', margin: '0 0 10px' }}>※ {n}</p>)}
+      {items.length === 0 ? (
+        <p style={{ fontSize: '13px', color: '#9FA8B0', margin: 0 }}>
+          全体平均と比べて、大きく見劣りする指標や際立った強みは見当たりませんでした。試合数が増えると、より具体的なアドバイスが出ます。
+        </p>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
+          {items.map((it, i) => {
+            const k = KINDS[it.kind];
+            return (
+              <div key={i} style={{ borderLeft: `3px solid ${k.color}`, background: `${k.color}0D`, borderRadius: '0 6px 6px 0', padding: '12px 14px' }}>
+                <div style={{ fontSize: '10px', fontWeight: 700, color: k.color, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{k.label}</div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#F2F5F7', margin: '2px 0 6px' }}>{it.title}</div>
+                <div style={{ fontSize: '13px', color: '#B4BEC8', lineHeight: 1.7 }}>{it.text}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '10px' }}>
+        このアドバイスはスタッツをもとに全体平均や自身の他の成績と比べて自動で作成しています（選択中のモードの試合が対象）。あくまで目安としてご活用ください。
+      </p>
+    </div>
+  );
+}
+
+// ---------- 個人ページ用: レーダーチャート ----------
+
+// 各軸の目盛り（中心 = min、外周 = max）。プレイ環境に合わせてここを調整してください
+const RADAR_AXES = [
+  { key: 'rwr', label: 'ラウンド勝率', min: 30,  max: 70,  fmt: (v) => `${r1(v)}%` },
+  { key: 'acs', label: 'ACS',          min: 100, max: 350, fmt: (v) => `${r1(v)}` },
+  { key: 'kd',  label: 'K/D',          min: 0.5, max: 2.0, fmt: (v) => v.toFixed(2) },
+  { key: 'adr', label: 'ADR',          min: 80,  max: 200, fmt: (v) => `${r1(v)}` },
+  { key: 'hs',  label: 'HS%',          min: 5,   max: 35,  fmt: (v) => `${r1(v)}%` },
+  { key: 'dd',  label: 'ダメージ差/R', min: -50, max: 50,  fmt: (v) => `${v >= 0 ? '+' : ''}${r1(v)}` },
+];
+
+// puuid を渡すとそのプレイヤー、null なら全プレイヤー合算（= 全体平均）
+function radarStats(matches, puuid) {
+  const acc = emptyAcc();
+  let roundsWon = 0, count = 0;
+  matches.forEach(m => {
+    const d = m.dashboard;
+    d.players.forEach(pl => {
+      if (puuid && pl.puuid !== puuid) return;
+      addRaw(acc, pl.raw);
+      const own = d.teams[String(pl.team).toLowerCase()] || {};
+      roundsWon += own.rounds_won || 0;
+      count += 1;
+    });
+  });
+  const f = finalizeAcc(acc);
+  if (!count || !f.rounds) return null;
+  return {
+    rwr: 100 * roundsWon / f.rounds,
+    acs: f.acs, kd: Number(f.kd), adr: f.adr, hs: f.hs_pct,
+    dd: f.adr - f.dpr_received,
+    ddTotal: acc.damage_made - acc.damage_received,
+  };
+}
+
+function RadarSection({ puuid, matches }) {
+  const [showAvg, setShowAvg] = useState(true);
+  const me = radarStats(matches, puuid);
+  const avg = radarStats(matches, null);
+  if (!me) return <p style={{ fontSize: '12px', color: '#6B7885', margin: 0 }}>集計できるデータがありません。</p>;
+
+  const W = 380, H = 330, cx = W / 2, cy = 165, R = 105;
+  const n = RADAR_AXES.length;
+  const ang = (i) => -Math.PI / 2 + (2 * Math.PI * i) / n;
+  const norm = (ax, v) => Math.max(0, Math.min(1, (v - ax.min) / (ax.max - ax.min)));
+  const pt = (i, t) => [cx + R * t * Math.cos(ang(i)), cy + R * t * Math.sin(ang(i))];
+  const poly = (stats) => RADAR_AXES.map((ax, i) => pt(i, norm(ax, stats[ax.key])).join(',')).join(' ');
+  const ring = (t) => RADAR_AXES.map((_, i) => pt(i, t).join(',')).join(' ');
+
+  const MINE = '#9B8CFF', AVG = '#8B9AA8';
+  const th = { textAlign: 'right', padding: '6px 10px', color: '#6B7885', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', textAlign: 'right', color: '#9FA8B0', whiteSpace: 'nowrap', fontSize: '13px' };
+
+  return (
+    <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ flex: '0 1 380px', minWidth: '280px', width: '100%', maxWidth: '380px' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+          {[0.25, 0.5, 0.75, 1].map(t => (
+            <polygon key={t} points={ring(t)} fill="none" stroke={t === 1 ? '#2A333B' : '#1E262E'} strokeWidth="1" />
+          ))}
+          {RADAR_AXES.map((ax, i) => {
+            const [ex, ey] = pt(i, 1);
+            const [lx, ly] = pt(i, 1.2);
+            const c = Math.cos(ang(i));
+            const anchor = c > 0.3 ? 'start' : c < -0.3 ? 'end' : 'middle';
+            return (
+              <g key={ax.key}>
+                <line x1={cx} y1={cy} x2={ex} y2={ey} stroke="#1E262E" strokeWidth="1" />
+                <text x={lx} y={ly - 2} textAnchor={anchor} fontSize="12" fontWeight="700" fill="#C7D0D8">{ax.label}</text>
+                <text x={lx} y={ly + 12} textAnchor={anchor} fontSize="11" fill={MINE}>{ax.fmt(me[ax.key])}</text>
+              </g>
+            );
+          })}
+          {showAvg && avg && (
+            <polygon points={poly(avg)} fill={AVG} fillOpacity="0.10" stroke={AVG} strokeWidth="1.5" strokeDasharray="5,4" />
+          )}
+          <polygon points={poly(me)} fill={MINE} fillOpacity="0.28" stroke={MINE} strokeWidth="2" />
+          {RADAR_AXES.map((ax, i) => {
+            const [px, py] = pt(i, norm(ax, me[ax.key]));
+            return <circle key={ax.key} cx={px} cy={py} r="3.5" fill={MINE} stroke="#0a0d12" strokeWidth="1.5">
+              <title>{`${ax.label}: ${ax.fmt(me[ax.key])}`}</title>
+            </circle>;
+          })}
+        </svg>
+        <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '12px', color: '#8B9AA8', flexWrap: 'wrap' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '14px', height: '3px', background: MINE, display: 'inline-block' }} />このプレイヤー
+          </span>
+          <span onClick={() => setShowAvg(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', opacity: showAvg ? 1 : 0.4 }} title="クリックで表示切替">
+            <span style={{ width: '14px', borderTop: `2px dashed ${AVG}`, display: 'inline-block' }} />全体平均
+          </span>
+        </div>
+      </div>
+
+      <div style={{ flex: '1 1 340px', minWidth: '300px', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #1E262E' }}>
+              <th style={{ ...th, textAlign: 'left' }}>指標</th>
+              <th style={th}>本人</th><th style={th}>全体平均</th><th style={th}>差</th><th style={th}>目盛り</th>
+            </tr>
+          </thead>
+          <tbody>
+            {RADAR_AXES.map(ax => {
+              const diff = avg ? me[ax.key] - avg[ax.key] : null;
+              return (
+                <tr key={ax.key} style={{ borderBottom: '1px solid #161B21' }}>
+                  <td style={{ ...td, textAlign: 'left', color: '#EDEFF2', fontWeight: 600 }}>{ax.label}</td>
+                  <td style={{ ...td, color: '#EDEFF2', fontWeight: 700 }}>{ax.fmt(me[ax.key])}</td>
+                  <td style={td}>{avg ? ax.fmt(avg[ax.key]) : '-'}</td>
+                  <td style={{ ...td, fontWeight: 600, color: diff == null ? '#6B7885' : diff >= 0 ? '#4ADE80' : '#FF6B6B' }}>
+                    {diff == null ? '-' : `${diff >= 0 ? '+' : ''}${ax.key === 'kd' ? diff.toFixed(2) : r1(diff)}`}
+                  </td>
+                  <td style={{ ...td, color: '#5A6570', fontSize: '11px' }}>{ax.min} – {ax.max}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '8px', lineHeight: 1.6 }}>
+          ラウンド勝率 = 所属チームの勝利ラウンド数 ÷ ラウンド数 · ダメージ差/R = (与ダメ − 被ダメ) ÷ ラウンド数（通算は {me.ddTotal >= 0 ? '+' : ''}{me.ddTotal}）<br />
+          レーダーは「目盛り」の範囲を中心〜外周として描画しています。全体平均は、選択中のモードの全試合の全プレイヤーを合算した値です
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------- 個人ページ用: マップ別 キル/デス位置 ----------
+
+function PlayerPositionMap({ profile, mapMetaCache, setMapMetaCache }) {
+  const mapNames = profile.maps.map(m => m.label).filter(n => profile.positionsByMap[n]);
+  const [selMap, setSelMap] = useState(null);
+  const [posSide, setPosSide] = useState('total');
+  const [showKills, setShowKills] = useState(true);
+  const [showDeaths, setShowDeaths] = useState(true);
+  const [showLinks, setShowLinks] = useState(false);
+  const [viewMode, setViewMode] = useState('points');
+  const [hover, setHover] = useState(null);
+
+  // プレイヤーやモードの切り替えで選択中のマップが無くなった場合は、最多出場マップに戻す
+  const mapName = mapNames.includes(selMap) ? selMap : mapNames[0];
+  const cacheEntry = mapName ? mapMetaCache[mapName] : null;
+
+  React.useEffect(() => {
+    if (!mapName || mapMetaCache[mapName]) return;
+    setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'loading' } }));
+    fetch('https://valorant-api.com/v1/maps')
+      .then(res => res.json())
+      .then(json => {
+        const found = (json.data || []).find(m => m.displayName === mapName);
+        if (!found || !found.displayIcon) {
+          setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'error', message: 'マップ画像が見つかりませんでした' } }));
+          return;
+        }
+        setMapMetaCache(prev => ({
+          ...prev,
+          [mapName]: {
+            status: 'ready', displayIcon: found.displayIcon,
+            xMultiplier: found.xMultiplier, yMultiplier: found.yMultiplier,
+            xScalarToAdd: found.xScalarToAdd, yScalarToAdd: found.yScalarToAdd,
+          },
+        }));
+      })
+      .catch(err => {
+        setMapMetaCache(prev => ({ ...prev, [mapName]: { status: 'error', message: String(err) } }));
+      });
+  }, [mapName]);
+
+  if (!mapName) {
+    return <p style={{ fontSize: '12px', color: '#6B7885', margin: 0 }}>位置データのある試合がありません。</p>;
+  }
+
+  const pos = profile.positionsByMap[mapName];
+  const filterBySide = (arr) => posSide === 'total' ? arr : arr.filter(e => e.side === posSide);
+  const kills = filterBySide(pos.kills);
+  const deaths = filterBySide(pos.deaths);
+  const mapRow = profile.maps.find(m => m.label === mapName);
+
+  const chip = (active, color, onClick, label, key) => (
+    <div key={key} onClick={onClick} style={{
+      padding: '6px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+      border: `1px solid ${active ? color : '#2A333B'}`,
+      color: active ? color : '#5A6570',
+      background: active ? `${color}14` : 'transparent', whiteSpace: 'nowrap',
+    }}>{label}</div>
+  );
+
+  const mapSelect = (
+    <select value={mapName} onChange={(e) => { setSelMap(e.target.value); setHover(null); }} style={{
+      padding: '8px 10px', borderRadius: '4px', border: '1px solid #2A333B', background: '#12171D',
+      color: '#EDEFF2', fontSize: '13px', fontFamily: 'inherit', minWidth: '180px',
+    }}>
+      {mapNames.map(n => {
+        const row = profile.maps.find(m => m.label === n);
+        return <option key={n} value={n}>{n}（{row ? row.matches : 0}試合）</option>;
+      })}
+    </select>
+  );
+
+  let body;
+  if (!cacheEntry || cacheEntry.status === 'loading') {
+    body = <div style={{ padding: '40px', textAlign: 'center', color: '#6B7885', fontSize: '13px' }}>マップデータを読み込み中（valorant-api.com）...</div>;
+  } else if (cacheEntry.status === 'error') {
+    body = <div style={{ padding: '20px', color: '#FF9B9B', fontSize: '13px' }}>マップデータの取得に失敗しました: {cacheEntry.message}</div>;
+  } else {
+    body = (
+      <div style={{
+        position: 'relative', border: '1px solid #1E262E', borderRadius: '6px', overflow: 'hidden',
+        background: '#0D1117', width: '100%', maxWidth: '560px', aspectRatio: '1 / 1',
+      }}>
+        <img src={cacheEntry.displayIcon} alt={mapName + ' minimap'} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+
+        {viewMode === 'heatmap' && (
+          <HeatmapCanvas points={[
+            ...(showKills ? kills.map(k => projectToNorm(k.x, k.y, cacheEntry)) : []),
+            ...(showDeaths ? deaths.map(d => projectToNorm(d.x, d.y, cacheEntry)) : []),
+          ]} />
+        )}
+
+        {viewMode === 'points' && (
+          <svg viewBox="0 0 1 1" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+            {showDeaths && deaths.map((d, i) => {
+              const [nx, ny] = projectToNorm(d.x, d.y, cacheEntry);
+              const hasEnemy = showLinks && d.enemyX != null && d.enemyY != null;
+              const [enx, eny] = hasEnemy ? projectToNorm(d.enemyX, d.enemyY, cacheEntry) : [null, null];
+              const r = 0.007;
+              return (
+                <g key={'d' + i}>
+                  {hasEnemy && <line x1={nx} y1={ny} x2={enx} y2={eny} stroke="#FF3B3B" strokeOpacity="0.4" strokeWidth="0.0015" strokeDasharray="0.006,0.005" />}
+                  {hasEnemy && <circle cx={enx} cy={eny} r="0.0055" fill="none" stroke="#8B9AA8" strokeWidth="0.0016" />}
+                  <g onMouseEnter={() => setHover({ type: 'death', data: d })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }}>
+                    <line x1={nx - r} y1={ny - r} x2={nx + r} y2={ny + r} stroke="#FF3B3B" strokeWidth={r * 0.4} strokeLinecap="round" />
+                    <line x1={nx - r} y1={ny + r} x2={nx + r} y2={ny - r} stroke="#FF3B3B" strokeWidth={r * 0.4} strokeLinecap="round" />
+                  </g>
+                </g>
+              );
+            })}
+            {showKills && kills.map((k, i) => {
+              const [nx, ny] = projectToNorm(k.x, k.y, cacheEntry);
+              const hasEnemy = showLinks && k.enemyX != null && k.enemyY != null;
+              const [enx, eny] = hasEnemy ? projectToNorm(k.enemyX, k.enemyY, cacheEntry) : [null, null];
+              return (
+                <g key={'k' + i}>
+                  {hasEnemy && <line x1={nx} y1={ny} x2={enx} y2={eny} stroke="#4ADE80" strokeOpacity="0.4" strokeWidth="0.0015" strokeDasharray="0.006,0.005" />}
+                  {hasEnemy && <circle cx={enx} cy={eny} r="0.0055" fill="none" stroke="#8B9AA8" strokeWidth="0.0016" />}
+                  <circle cx={nx} cy={ny} r="0.006" fill="#4ADE80" fillOpacity="0.9" stroke="#0D1116" strokeWidth="0.0013"
+                    onMouseEnter={() => setHover({ type: 'kill', data: k })} onMouseLeave={() => setHover(null)} style={{ cursor: 'pointer' }} />
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
+        {viewMode === 'points' && hover && (
+          <div style={{
+            position: 'absolute', top: '10px', left: '10px',
+            background: '#0D1116EE', border: `1px solid ${hover.type === 'kill' ? '#4ADE80' : '#FF6B6B'}`,
+            borderRadius: '4px', padding: '8px 12px', fontSize: '12px', lineHeight: 1.6, pointerEvents: 'none', maxWidth: '280px',
+          }}>
+            <div style={{ fontWeight: 700, color: hover.type === 'kill' ? '#4ADE80' : '#FF6B6B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {hover.type === 'kill' ? 'Kill' : 'Death'} — Round {hover.data.round + 1}{hover.data.t != null ? ` · ${fmtRoundTime(hover.data.t)}` : ''}
+            </div>
+            <div style={{ color: '#C7D0D8' }}>
+              {hover.type === 'kill'
+                ? `→ ${hover.data.victim} (${hover.data.weapon || '不明'})`
+                : `${hover.data.killer} → (${hover.data.weapon || '不明'})`}
+            </div>
+            <div style={{ color: '#6B7885' }}>{formatDate(hover.data.ts)} · {hover.data.agent} · {SIDE_LABEL[hover.data.side] || ''}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
+        {mapSelect}
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {['total', 'attack', 'defense'].map(sd => chip(posSide === sd, SIDE_ACCENT[sd], () => setPosSide(sd), SIDE_LABEL[sd], sd))}
+        </div>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {chip(showKills, '#4ADE80', () => setShowKills(v => !v), `Kills (${kills.length})`, 'k')}
+          {chip(showDeaths, '#FF6B6B', () => setShowDeaths(v => !v), `Deaths (${deaths.length})`, 'd')}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+        {[['points', 'ポイント表示'], ['heatmap', 'ヒートマップ']].map(([k, label]) => chip(viewMode === k, '#9B8CFF', () => setViewMode(k), label, k))}
+        {viewMode === 'points' && chip(showLinks, '#8B9AA8', () => setShowLinks(v => !v), '敵位置を線で表示', 'links')}
+      </div>
+
+      {body}
+
+      <div style={{ display: 'flex', gap: '20px', marginTop: '10px', fontSize: '12px', color: '#8B9AA8', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#4ADE80', display: 'inline-block' }} />キル位置
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ color: '#FF3B3B', fontWeight: 900 }}>×</span>デス位置
+        </div>
+        {mapRow && <div style={{ color: '#6B7885' }}>{mapRow.matches}試合分を重ねて表示</div>}
+      </div>
+    </div>
+  );
+}
+
+function PlayerPage({ puuid, matches, players, onSelectPlayer, onOpenMatch, mapMetaCache, setMapMetaCache }) {
+  const profile = buildPlayerProfile(puuid, matches);
+
+  const selector = (
+    <select value={puuid} onChange={(e) => onSelectPlayer(e.target.value)} style={{
+      padding: '8px 10px', borderRadius: '4px', border: '1px solid #2A333B', background: '#12171D',
+      color: '#EDEFF2', fontSize: '13px', fontFamily: 'inherit', maxWidth: '100%'
+    }}>
+      {players.map(pl => <option key={pl.puuid} value={pl.puuid}>{pl.name}#{pl.tag}（{pl.matches}試合）</option>)}
+    </select>
+  );
+
+  if (!profile) {
+    return (
+      <div>
+        <div style={{ marginBottom: '16px' }}>{selector}</div>
+        <p style={{ fontSize: '13px', color: '#8B9AA8' }}>このプレイヤーは、選択中のモードの試合には出場していません。モードの絞り込みを変えてください。</p>
+      </div>
+    );
+  }
+
+  const t = profile.total;
+  const cards = [
+    { label: '試合数', value: t.matches, sub: `${t.wins}勝 ${t.losses}敗`, accent: '#9B8CFF' },
+    { label: '勝率', value: `${t.win_rate}%`, sub: `${t.rounds}ラウンド`, accent: t.win_rate >= 50 ? '#4ADE80' : '#FF6B6B' },
+    { label: 'ACS', value: t.acs, sub: '', accent: '#FFD166' },
+    { label: 'K/D', value: Number(t.kd).toFixed(2), sub: `${t.kills}K / ${t.deaths}D / ${t.assists}A`, accent: t.kd >= 1 ? '#4ADE80' : '#FF6B6B' },
+    { label: 'ADR', value: t.adr, sub: `被ダメ ${t.dpr_received}/R`, accent: '#5CC8FF' },
+    { label: 'HS%', value: `${t.hs_pct}%`, sub: '', accent: '#5CC8FF' },
+    { label: 'FK / FD', value: `${t.fk} / ${t.fd}`, sub: `差 ${t.fk - t.fd >= 0 ? '+' : ''}${t.fk - t.fd}`, accent: '#F5A623' },
+    { label: '最高ACS', value: profile.bestAcs.acs, sub: `${profile.bestAcs.map} ${profile.bestAcs.agent}`, accent: '#FFD166' },
+    { label: '最多キル', value: profile.mostKills.kills, sub: `${profile.mostKills.map} ${profile.mostKills.agent}`, accent: '#4ADE80' },
+  ];
+
+  const th = { textAlign: 'right', padding: '6px 10px', color: '#6B7885', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', whiteSpace: 'nowrap' };
+  const td = { padding: '9px 10px', textAlign: 'right', color: '#9FA8B0', whiteSpace: 'nowrap' };
+  const historyDesc = profile.history.slice().reverse();
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
+        <div>
+          <div style={{ fontSize: '11px', color: '#6B7885', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Player Profile</div>
+          <div style={{ fontSize: '28px', fontWeight: 700, color: '#F2F5F7', lineHeight: 1.2 }}>
+            {profile.name}<span style={{ fontSize: '16px', color: '#6B7885', fontWeight: 500 }}> #{profile.tag}</span>
+          </div>
+          <div style={{ fontSize: '12px', color: '#8B9AA8', marginTop: '4px' }}>
+            {profile.rank ? `ランク: ${profile.rank} · ` : ''}よく使うエージェント: {profile.agents.slice(0, 3).map(a => `${a.label}(${a.matches})`).join(' / ')}
+          </div>
+          {profile.aliases.length > 1 && (
+            <div style={{ fontSize: '11px', color: '#5A6570', marginTop: '2px' }}>過去の名前: {profile.aliases.join(', ')}</div>
+          )}
+        </div>
+        <div>{selector}</div>
+      </div>
+
+      <ProfileSection title="Advice" sub="スタッツからの自動アドバイス">
+        <AdviceSection profile={profile} matches={matches} puuid={puuid} />
+      </ProfileSection>
+
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '26px' }}>
+        {cards.map((c, i) => (
+          <div key={i} style={{ flex: '1 1 140px', minWidth: '130px', border: `1px solid ${c.accent}44`, borderRadius: '6px', padding: '12px 14px', background: `${c.accent}0D` }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: c.accent, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{c.label}</div>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#F2F5F7', lineHeight: 1.2 }}>{c.value}</div>
+            <div style={{ fontSize: '11px', color: '#8B9AA8', minHeight: '14px' }}>{c.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <ProfileSection title="Radar" sub="主要指標のバランス（全体平均との比較）">
+        <RadarSection puuid={puuid} matches={matches} />
+      </ProfileSection>
+
+      <ProfileSection title="Attack / Defense" sub="サイド別の成績">
+        <BreakdownTable
+          labelHeader="サイド" showMatches={false}
+          rows={[{ label: 'アタック', ...profile.side.attack }, { label: 'ディフェンス', ...profile.side.defense }]}
+        />
+      </ProfileSection>
+
+      <ProfileSection title="ACS Trend" sub="試合ごとのACS（緑=勝ち / 赤=負け、左が古い試合）">
+        <div style={{ border: '1px solid #1E262E', borderRadius: '6px', padding: '10px 14px', maxWidth: '520px' }}>
+          <TrendChart history={profile.history} />
+        </div>
+      </ProfileSection>
+
+      <ProfileSection title="Kill / Death Map" sub="マップ別のキル・デス位置（選択中のモードの全試合を重ねて表示）">
+        <PlayerPositionMap profile={profile} mapMetaCache={mapMetaCache} setMapMetaCache={setMapMetaCache} />
+      </ProfileSection>
+
+      <ProfileSection title="By Agent" sub="エージェント別">
+        <BreakdownTable labelHeader="エージェント" showMatches rows={profile.agents} />
+      </ProfileSection>
+
+      <ProfileSection title="By Map" sub="マップ別">
+        <BreakdownTable labelHeader="マップ" showMatches rows={profile.maps} />
+      </ProfileSection>
+
+      <ProfileSection title="Match History" sub="新しい順 · 行をクリックでその試合を開く">
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '820px' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #1E262E' }}>
+                <th style={{ ...th, textAlign: 'left' }}>日時</th>
+                <th style={{ ...th, textAlign: 'left' }}>マップ</th>
+                <th style={{ ...th, textAlign: 'left' }}>モード</th>
+                <th style={{ ...th, textAlign: 'left' }}>エージェント</th>
+                <th style={th}>結果</th><th style={th}>K/D/A</th><th style={th}>K/D</th>
+                <th style={th}>ACS</th><th style={th}>ADR</th><th style={th}>HS%</th><th style={th}>FK/FD</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyDesc.map((h, i) => (
+                <tr key={i} onClick={() => onOpenMatch(h.id)} style={{ borderBottom: '1px solid #161B21', cursor: 'pointer' }}>
+                  <td style={{ ...td, textAlign: 'left' }}>{formatDate(h.ts)}</td>
+                  <td style={{ ...td, textAlign: 'left', color: '#EDEFF2', fontWeight: 600 }}>{h.map}</td>
+                  <td style={{ ...td, textAlign: 'left' }}>{h.modeLabel}</td>
+                  <td style={{ ...td, textAlign: 'left' }}>{h.agent}</td>
+                  <td style={{ ...td, color: h.won ? '#4ADE80' : '#FF6B6B', fontWeight: 700 }}>{h.won ? 'WIN' : 'LOSE'} {h.roundsFor}-{h.roundsAgainst}</td>
+                  <td style={td}>{h.kills}/{h.deaths}/{h.assists}</td>
+                  <td style={{ ...td, color: h.kd >= 1 ? '#4ADE80' : '#FF6B6B', fontWeight: 600 }}>{Number(h.kd).toFixed(2)}</td>
+                  <td style={{ ...td, color: '#EDEFF2', fontWeight: 700 }}>{h.acs}</td>
+                  <td style={td}>{h.adr}</td>
+                  <td style={td}>{h.hs_pct}%</td>
+                  <td style={td}>{h.fk}/{h.fd}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </ProfileSection>
+    </div>
+  );
+}
+
+// ---------- Main App ----------
+
+function MatchDashboardApp() {
+  const [matches, setMatches] = useState([]); // [{ id, fileName, dashboard, raw }]
+  const [error, setError] = useState(null);
+  const [showUpload, setShowUpload] = useState(false);
+  const [activeTab, setActiveTab] = useState('aggregate'); // 'aggregate' | match id
+  const [side, setSide] = useState('total');
+  const [sortKey, setSortKey] = useState('acs');
+  const [sortDir, setSortDir] = useState('desc');
+  const [aggSortKey, setAggSortKey] = useState('acs');
+  const [aggSortDir, setAggSortDir] = useState('desc');
+  const [matchView, setMatchView] = useState('stats'); // 'stats' | 'positions'
+  const [modeFilter, setModeFilter] = useState('all'); // 'all' | mode key
+  const [playerView, setPlayerView] = useState(null); // puuid | null
+  const [mapMetaCache, setMapMetaCache] = useState({}); // displayName -> { status, ...transform, displayIcon }
+  const [apiLoading, setApiLoading] = useState(false);
+
+  const processMatchJson = (json, fileName) => {
+    const dashboard = buildDashboardData(json);
+    return {
+      id: (dashboard.matchId || fileName || Math.random().toString(36)) + '_' + Math.random().toString(36).slice(2, 7),
+      fileName,
+      dashboard,
+      raw: json,
+    };
+  };
+
+  const commitNewMatches = (newMatches, errors) => {
+    if (newMatches.length) {
+      setMatches(prev => {
+        const existingIds = new Set(prev.map(m => m.dashboard.matchId).filter(Boolean));
+        const deduped = newMatches.filter(m => !m.dashboard.matchId || !existingIds.has(m.dashboard.matchId));
+        return [...prev, ...deduped];
+      });
+      setShowUpload(false);
+      setActiveTab('aggregate');
+    }
+    if (errors && errors.length) setError(errors.join(' / '));
+    else setError(null);
+  };
+
+  const handleFiles = useCallback((files) => {
+    setError(null);
+    let pending = files.length;
+    const newMatches = [];
+    const errors = [];
+
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (Array.isArray(parsed)) {
+            // exported bundle: array of raw match jsons
+            parsed.forEach((mj, idx) => {
+              try {
+                newMatches.push(processMatchJson(mj, `${file.name}#${idx + 1}`));
+              } catch (err) {
+                errors.push(`${file.name}#${idx + 1}: ${err.message}`);
+              }
+            });
+          } else if (parsed && Array.isArray(parsed.data) && parsed.data.length > 1) {
+            // APIレスポンスをそのまま保存したファイル（複数試合入り）
+            parsed.data.forEach((matchObj, idx) => {
+              try {
+                newMatches.push(processMatchJson({ status: parsed.status, data: [matchObj] }, `${file.name}#${idx + 1}`));
+              } catch (err) {
+                errors.push(`${file.name}#${idx + 1}: ${err.message}`);
+              }
+            });
+          } else {
+            newMatches.push(processMatchJson(parsed, file.name));
+          }
+        } catch (err) {
+          errors.push(`${file.name}: ${err.message}`);
+        } finally {
+          pending -= 1;
+          if (pending === 0) commitNewMatches(newMatches, errors);
+        }
+      };
+      reader.onerror = () => {
+        errors.push(`${file.name}: 読み込みに失敗しました`);
+        pending -= 1;
+        if (pending === 0) commitNewMatches(newMatches, errors);
+      };
+      reader.readAsText(file);
+    });
+  }, []);
+
+  const handleFetchApi = useCallback(async (params) => {
+    let { name, tag, region, apiKey, size, mode } = params;
+    setError(null);
+    setApiLoading(true);
+
+    // "名前#タグ" を名前欄にまとめて入力してしまった場合の補正
+    name = (name || '').trim();
+    tag = (tag || '').trim().replace(/^#/, '');
+    if (name.includes('#')) {
+      const i = name.lastIndexOf('#');
+      if (!tag) tag = name.slice(i + 1).trim();
+      name = name.slice(0, i).trim();
+    }
+    const headers = apiKey ? { Authorization: apiKey } : {};
+
+    const diagnoseNotFound = async () => {
+      try {
+        const r = await fetch(`https://api.henrikdev.xyz/valorant/v2/account/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`, { headers });
+        if (r.ok) {
+          const aj = await r.json();
+          const acctRegion = aj && aj.data && aj.data.region;
+          let msg = ' → 診断: このRiot IDのアカウント自体は存在します';
+          if (acctRegion) msg += `（アカウントのリージョン: ${acctRegion}）`;
+          msg += '。';
+          if (acctRegion && acctRegion !== region) msg += `選択中のリージョン（${region}）と違うので、${acctRegion}に変えて試してください。`;
+          else msg += '試合の検索で見つからなかったため、モード指定を外す・別のモードにする、またはその試合がAPI側に保存されていない可能性があります。';
+          return msg;
+        }
+        if (r.status === 404) return ' → 診断: Riot ID（名前#タグ）が見つかりません。綴り・全角半角・タグを確認してください（名前欄とタグ欄は分けて入力）。';
+        return ` → 診断: アカウント確認も失敗しました（HTTP ${r.status}）`;
+      } catch (e) {
+        return '';
+      }
+    };
+
+    try {
+      const url = `https://api.henrikdev.xyz/valorant/v3/matches/${region}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=${size}${mode ? '&mode=' + encodeURIComponent(mode) : ''}`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '');
+        let apiMsg = bodyText.slice(0, 200);
+        try {
+          const j = JSON.parse(bodyText);
+          if (j && j.errors && j.errors[0]) apiMsg = `${j.errors[0].message}（APIコード ${j.errors[0].code}）`;
+        } catch (e) { /* keep raw text */ }
+        const httpErr = new Error(apiMsg);
+        httpErr.httpStatus = res.status;
+        throw httpErr;
+      }
+      const json = await res.json();
+      const matchList = (Array.isArray(json.data) ? json.data : [json.data]).filter(Boolean);
+      if (!matchList.length) {
+        setError('該当する試合が見つかりませんでした（モード指定: ' + (mode || 'なし') + '）。リザルトが古い場合、API側に保存されていない可能性があります。');
+        return;
+      }
+      const newMatches = [];
+      const errors = [];
+      matchList.forEach((matchObj, idx) => {
+        try {
+          newMatches.push(processMatchJson({ status: json.status, data: [matchObj] }, `${name}#${tag}_${idx + 1}`));
+        } catch (err) {
+          errors.push(`試合${idx + 1}: ${err.message}`);
+        }
+      });
+      commitNewMatches(newMatches, errors);
+    } catch (err) {
+      if (err.httpStatus) {
+        // APIまでは届いている（= CORSの問題ではない）
+        let hint = '';
+        if (err.httpStatus === 404) hint = await diagnoseNotFound();
+        else if (err.httpStatus === 401 || err.httpStatus === 403) hint = ' → APIキーが未入力、または無効です。';
+        else if (err.httpStatus === 429) hint = ' → リクエスト制限に達しています。少し待ってから再実行してください。';
+        setError(`取得に失敗しました（HTTP ${err.httpStatus}）: ${err.message}${hint}`);
+      } else {
+        setError('通信に失敗しました: ' + err.message + '（ネットワーク接続、またはブラウザのCORS制限の可能性があります。その場合はPythonスクリプトで取得したJSONファイルをアップロードしてください）');
+      }
+    } finally {
+      setApiLoading(false);
+    }
+  }, []);
+
+  const handleExport = () => {
+    const bundle = matches.map(m => m.raw);
+    const blob = new Blob([JSON.stringify(bundle)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `valorant_matches_${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRemoveMatch = (id) => {
+    setMatches(prev => prev.filter(m => m.id !== id));
+    if (activeTab === id) setActiveTab('aggregate');
+  };
+
+  if (showUpload) {
+    return <UploadScreen onFiles={handleFiles} error={error} hasExisting={matches.length > 0} onCancel={() => setShowUpload(false)} onFetchApi={handleFetchApi} apiLoading={apiLoading} />;
+  }
+
+  const modeCounts = {};
+  matches.forEach(m => {
+    const k = modeKeyOf(m);
+    if (!modeCounts[k]) modeCounts[k] = { label: modeLabelOf(m), count: 0 };
+    modeCounts[k].count += 1;
+  });
+  const modeKeys = Object.keys(modeCounts);
+  const activeModeFilter = modeFilter !== 'all' && modeCounts[modeFilter] ? modeFilter : 'all';
+  const aggMatches = activeModeFilter === 'all' ? matches : matches.filter(m => modeKeyOf(m) === activeModeFilter);
+
+  const aggPlayers = buildAggregate(aggMatches);
+  const sortedAgg = aggPlayers.slice().sort((a, b) => (aggSortDir === 'desc' ? b[aggSortKey] - a[aggSortKey] : a[aggSortKey] - b[aggSortKey]));
+  const aggMvp = aggPlayers.slice().sort((a, b) => b.acs - a.acs)[0];
+  const aggTopFK = aggPlayers.slice().sort((a, b) => b.fk - a.fk)[0];
+  const aggTopWin = aggPlayers.filter(p => p.matches >= 2).sort((a, b) => b.win_rate - a.win_rate)[0] || aggPlayers.slice().sort((a, b) => b.win_rate - a.win_rate)[0];
+  const aggRoundTypes = buildAggregateRoundTypes(aggMatches);
+
+  const handleAggSort = (key) => {
+    if (key === aggSortKey) setAggSortDir(d => (d === 'desc' ? 'asc' : 'desc'));
+    else { setAggSortKey(key); setAggSortDir('desc'); }
+  };
+
+  const currentMatch = activeTab === 'aggregate' ? null : matches.find(m => m.id === activeTab);
+
+  const headerTabs = (
+    <div style={{ display: 'flex', gap: '6px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div
+        onClick={() => { setActiveTab('aggregate'); setPlayerView(null); }}
+        style={{
+          padding: '8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 700,
+          letterSpacing: '0.03em', cursor: 'pointer',
+          border: `1px solid ${activeTab === 'aggregate' && !playerView ? '#9B8CFF' : '#2A333B'}`,
+          color: activeTab === 'aggregate' && !playerView ? '#9B8CFF' : '#8B9AA8',
+          background: activeTab === 'aggregate' && !playerView ? '#9B8CFF14' : 'transparent'
+        }}
+      >
+        通算（{matches.length}試合）
+      </div>
+      {matches.map(m => (
+        <div key={m.id} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <div
+            onClick={() => { setActiveTab(m.id); setMatchView('stats'); setPlayerView(null); }}
+            style={{
+              padding: '8px 28px 8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 600,
+              cursor: 'pointer',
+              border: `1px solid ${activeTab === m.id && !playerView ? '#5CC8FF' : '#2A333B'}`,
+              color: activeTab === m.id && !playerView ? '#5CC8FF' : '#8B9AA8',
+              background: activeTab === m.id && !playerView ? '#5CC8FF14' : 'transparent'
+            }}
+          >
+            {m.dashboard.map}<span style={{ marginLeft: '6px', fontSize: '11px', fontWeight: 500, opacity: 0.7 }}>{modeLabelOf(m)}</span>
+          </div>
+          <span
+            onClick={() => handleRemoveMatch(m.id)}
+            title="この試合を削除"
+            style={{ position: 'absolute', right: '8px', fontSize: '13px', color: '#5A6570', cursor: 'pointer' }}
+          >×</span>
+        </div>
+      ))}
+      <div
+        onClick={() => setShowUpload(true)}
+        style={{
+          padding: '8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 700,
+          cursor: 'pointer', border: '1px solid #2A333B', color: '#9B8CFF', background: '#9B8CFF14'
+        }}
+      >
+        ⚙ 管理者ページ
+      </div>
+      {matches.length > 0 && (
+        <div
+          onClick={handleExport}
+          style={{
+            padding: '8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 700,
+            cursor: 'pointer', border: '1px solid #2A333B', color: '#4ADE80', marginLeft: 'auto'
+          }}
+        >
+          ⬇ エクスポート
+        </div>
+      )}
+    </div>
+  );
+
+  const modeChips = matches.length > 0 ? (
+  <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+    <span style={{ fontSize: '11px', color: '#6B7885', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>モード</span>
+    {[['all', 'すべて', matches.length], ...modeKeys.map(k => [k, modeCounts[k].label, modeCounts[k].count])].map(([k, label, cnt]) => (
+      <div key={k} onClick={() => setModeFilter(k)} style={{
+        padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+        border: `1px solid ${activeModeFilter === k ? '#4ADE80' : '#2A333B'}`,
+        color: activeModeFilter === k ? '#4ADE80' : '#8B9AA8',
+        background: activeModeFilter === k ? '#4ADE8014' : 'transparent'
+      }}>{label}（{cnt}）</div>
+    ))}
+  </div>
+  ) : null;
+
+  if (playerView) {
+    return (
+      <div style={{
+        fontFamily: "'Rajdhani', 'Inter', system-ui, sans-serif",
+        background: 'radial-gradient(circle at 20% 0%, #10151d 0%, #0a0d12 55%, #07090c 100%)',
+        color: '#E8ECEF', padding: '28px', minHeight: '100%', boxSizing: 'border-box'
+      }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+        `}</style>
+        {headerTabs}
+        {modeChips}
+        <PlayerPage
+          puuid={playerView}
+          matches={aggMatches}
+          players={listPlayers(matches)}
+          onSelectPlayer={setPlayerView}
+          onOpenMatch={(id) => { setPlayerView(null); setActiveTab(id); setMatchView('stats'); }}
+          mapMetaCache={mapMetaCache}
+          setMapMetaCache={setMapMetaCache}
+        />
+      </div>
+    );
+  }
+
+  if (activeTab === 'aggregate') {
+    return (
+      <div style={{
+        fontFamily: "'Rajdhani', 'Inter', system-ui, sans-serif",
+        background: 'radial-gradient(circle at 20% 0%, #10151d 0%, #0a0d12 55%, #07090c 100%)',
+        color: '#E8ECEF', padding: '28px', minHeight: '100%', boxSizing: 'border-box'
+      }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+        `}</style>
+
+        <div style={{ marginBottom: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: '26px', fontWeight: 700, margin: 0, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#F2F5F7' }}>
+              通算ダッシュボード
+            </h1>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: '#8B9AA8' }}>
+              {aggMatches.length}試合を集計中{activeModeFilter !== 'all' ? `（${modeCounts[activeModeFilter].label}のみ）` : ''}
+            </span>
+          </div>
+          <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#5A6570' }}>
+            試合をまたいで同一プレイヤー（PUUID一致）の成績を合算しています。列見出しクリックで並び替え
+          </p>
+        </div>
+
+        {headerTabs}
+
+        {matches.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#8B9AA8', border: '1px solid #1E262E', borderRadius: '8px', background: '#12171D' }}>
+            <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', color: '#EDEFF2' }}>試合データがまだありません</div>
+            <p style={{ fontSize: '13px', marginBottom: '20px' }}>右上の「⚙ 管理者ページ」から試合データのJSONをアップロードするか、APIから取得してください。</p>
+            <div
+              onClick={() => setShowUpload(true)}
+              style={{
+                display: 'inline-block', padding: '10px 20px', borderRadius: '4px', fontSize: '13px', fontWeight: 700,
+                cursor: 'pointer', border: '1px solid #9B8CFF', color: '#0a0d12', background: '#9B8CFF'
+              }}
+            >
+              管理者ページを開く
+            </div>
+          </div>
+        ) : (
+          <>
+            {modeChips}
+
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
+              {[
+                { label: 'MVP (通算ACS)', name: aggMvp ? aggMvp.name : '-', sub: aggMvp ? `ACS ${aggMvp.acs}` : '', accent: '#FFD166' },
+                { label: 'MOST FIRST KILLS', name: aggTopFK ? aggTopFK.name : '-', sub: aggTopFK ? `${aggTopFK.fk} FK` : '', accent: '#5CC8FF' },
+                { label: 'BEST WIN RATE (2試合以上)', name: aggTopWin ? aggTopWin.name : '-', sub: aggTopWin ? `${aggTopWin.win_rate}% (${aggTopWin.wins}/${aggTopWin.matches})` : '', accent: '#4ADE80' },
+              ].map((h, i) => (
+                <div key={i} style={{ flex: '1 1 200px', border: `1px solid ${h.accent}44`, borderRadius: '6px', padding: '12px 16px', background: `${h.accent}0D` }}>
+                  <div style={{ fontSize: '10px', fontWeight: 700, color: h.accent, letterSpacing: '0.08em' }}>{h.label}</div>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#F2F5F7', marginTop: '2px' }}>{h.name}</div>
+                  <div style={{ fontSize: '12px', color: '#8B9AA8' }}>{h.sub}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '820px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #1E262E' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 10px', color: '#6B7885', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase' }}>Player</th>
+                    <th style={{ textAlign: 'left', padding: '6px 10px', color: '#6B7885', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase' }}>Main Agent</th>
+                    {AGG_COLUMNS.map(col => (
+                      <th key={col.key} onClick={() => handleAggSort(col.key)}
+                        style={{
+                          textAlign: 'right', padding: '6px 10px', cursor: 'pointer', userSelect: 'none',
+                          color: aggSortKey === col.key ? '#9B8CFF' : '#6B7885',
+                          fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', whiteSpace: 'nowrap'
+                        }}>
+                        {col.label}{aggSortKey === col.key ? (aggSortDir === 'desc' ? ' \u25be' : ' \u25b4') : ''}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedAgg.map((p, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #161B21' }}>
+                      <td style={{ padding: '9px 10px', fontWeight: 600, color: '#EDEFF2', whiteSpace: 'nowrap' }}>
+                        <PlayerLink p={p} onOpen={setPlayerView} />
+                      </td>
+                      <td style={{ padding: '9px 10px', color: '#9FA8B0' }}>{p.mainCharacter}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#9FA8B0' }}>{p.matches}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: p.win_rate >= 50 ? '#4ADE80' : '#FF6B6B', fontWeight: 600 }}>{p.win_rate}%</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: '#EDEFF2' }}>{p.acs}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#4ADE80', fontWeight: 600 }}>{p.kills}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#FF6B6B', fontWeight: 600 }}>{p.deaths}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#9FA8B0' }}>{p.assists}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: p.kd >= 1 ? '#4ADE80' : '#FF6B6B', fontWeight: 600 }}>{p.kd.toFixed(2)}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#9FA8B0' }}>{p.adr}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#9FA8B0' }}>{p.hs_pct}%</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#5CC8FF', fontWeight: 600 }}>{p.fk}</td>
+                      <td style={{ padding: '9px 10px', textAlign: 'right', color: '#F5A623', fontWeight: 600 }}>{p.fd}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ marginTop: '28px', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', borderLeft: '3px solid #9B8CFF', paddingLeft: '10px' }}>
+                <span style={{ fontSize: '15px', fontWeight: 700, color: '#9B8CFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Round Type Breakdown</span>
+                <span style={{ fontSize: '13px', color: '#6B7885' }}>{aggMatches.length}試合通算のラウンドタイプ別勝率</span>
+              </div>
+              <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+                <RoundTypeCard breakdown={aggRoundTypes} title={`全体（${aggMatches.reduce((sum, m) => sum + m.dashboard.rounds_played, 0)}ラウンド分）`} />
+              </div>
+            </div>
+
+            <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '16px' }}>
+              M = 出場試合数 / Win% = そのプレイヤーが所属したチームの勝率 \u00b7 通算スタッツはラウンド重み付き平均（ACS・ADR・HS%）または合計（K/D/A・FK/FD）\u00b7「エクスポート」で現在読み込んでいる{matches.length}試合をまとめて1つのJSONとして保存できます
+            </p>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ---- Single match view (reuses previous single-match dashboard layout) ----
+  const MATCH_DATA = currentMatch.dashboard;
+  const players = MATCH_DATA.players;
+  const withTotal = players.map(p => ({ ...p, total: combineTotal(p) }));
+  const mvp = withTotal.slice().sort((a, b) => b.total.acs - a.total.acs)[0];
+  const topFK = withTotal.slice().sort((a, b) => b.total.fk - a.total.fk)[0];
+  const topFD = withTotal.slice().sort((a, b) => b.total.fd - a.total.fd)[0];
+  const blueScore = MATCH_DATA.teams.blue.rounds_won;
+  const redScore = MATCH_DATA.teams.red.rounds_won;
+  const siteOverall = MATCH_DATA.site_breakdown.overall;
+  const siteByTeam = MATCH_DATA.site_breakdown.by_team;
+  const siteKeys = Object.keys(siteOverall).sort((a, b) => (a === 'None' ? 1 : b === 'None' ? -1 : a.localeCompare(b)));
+
+  const handleSort = (key) => {
+    if (key === sortKey) setSortDir(d => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const renderTeamTable = (team) => {
+    const rows = sortPlayers(players, team, side, sortKey, sortDir);
+    const color = TEAM_COLOR[team];
+    return (
+      <div style={{ marginBottom: '28px', maxWidth: '1000px' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px',
+          borderLeft: `3px solid ${color}`, paddingLeft: '10px'
+        }}>
+          <span style={{ fontSize: '15px', fontWeight: 700, color, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            {team === 'Blue' ? 'Blue Team' : 'Red Team'}
+          </span>
+          <span style={{ fontSize: '13px', color: '#6B7885' }}>
+            {team === 'Blue' ? blueScore : redScore} rounds won
+            {MATCH_DATA.winningTeam === team ? ' \u00b7 WIN' : ''}
+          </span>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '720px' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #1E262E' }}>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: '#6B7885', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase' }}>Player</th>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: '#6B7885', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase' }}>Agent</th>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: '#6B7885', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase' }}>Rank</th>
+                {COLUMNS.map(col => (
+                  <th key={col.key} onClick={() => handleSort(col.key)}
+                    style={{
+                      textAlign: 'right', padding: '6px 8px', cursor: 'pointer', userSelect: 'none',
+                      color: sortKey === col.key ? color : '#6B7885',
+                      fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', whiteSpace: 'nowrap'
+                    }}>
+                    {col.label}{sortKey === col.key ? (sortDir === 'desc' ? ' \u25be' : ' \u25b4') : ''}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => {
+                const p = row.meta, s = row.s;
+                const isMvp = p.name === mvp.name && p.tag === mvp.tag;
+                return (
+                  <tr key={i} style={{ borderBottom: '1px solid #161B21', background: isMvp ? `${color}0F` : 'transparent' }}>
+                    <td style={{ padding: '8px', fontWeight: 600, color: '#EDEFF2', whiteSpace: 'nowrap' }}>
+                      <PlayerLink p={p} onOpen={setPlayerView} />
+                      {isMvp && <span style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 700, color: '#FFD166', border: '1px solid #FFD16688', borderRadius: '3px', padding: '1px 5px' }}>MVP</span>}
+                    </td>
+                    <td style={{ padding: '8px', color: '#9FA8B0' }}>{p.character}</td>
+                    <td style={{ padding: '8px', color: '#9FA8B0', whiteSpace: 'nowrap' }}>{p.rank}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', fontWeight: 700, color: '#EDEFF2' }}>{s.acs}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#4ADE80', fontWeight: 600 }}>{s.kills}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#FF6B6B', fontWeight: 600 }}>{s.deaths}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#9FA8B0' }}>{s.assists}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: s.kd >= 1 ? '#4ADE80' : '#FF6B6B', fontWeight: 600 }}>{s.kd.toFixed(2)}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#9FA8B0' }}>{s.adr}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#EDEFF2' }}>{s.damage_made.toLocaleString()}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#9FA8B0' }}>{s.damage_received.toLocaleString()}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#9FA8B0' }}>{s.hs_pct}%</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#5CC8FF', fontWeight: 600 }}>{s.fk}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#F5A623', fontWeight: 600 }}>{s.fd}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      fontFamily: "'Rajdhani', 'Inter', system-ui, sans-serif",
+      background: 'radial-gradient(circle at 20% 0%, #10151d 0%, #0a0d12 55%, #07090c 100%)',
+      color: '#E8ECEF', padding: '28px', minHeight: '100%', boxSizing: 'border-box'
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+      `}</style>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px', marginBottom: '18px' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: '26px', fontWeight: 700, margin: 0, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#F2F5F7' }}>
+              Match Dashboard
+            </h1>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: '#8B9AA8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              {MATCH_DATA.map} \u00b7 {MATCH_DATA.mode}
+            </span>
+          </div>
+          <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#5A6570' }}>
+            全{MATCH_DATA.rounds_played}ラウンド終了 \u00b7 {currentMatch.fileName}
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '11px', color: TEAM_COLOR.Blue, fontWeight: 700, textTransform: 'uppercase' }}>Blue</div>
+            <div style={{ fontSize: '30px', fontWeight: 700, color: '#F2F5F7', lineHeight: 1 }}>{blueScore}</div>
+          </div>
+          <div style={{ fontSize: '18px', color: '#3A4550', fontWeight: 700 }}>\u2014</div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '11px', color: TEAM_COLOR.Red, fontWeight: 700, textTransform: 'uppercase' }}>Red</div>
+            <div style={{ fontSize: '30px', fontWeight: 700, color: '#F2F5F7', lineHeight: 1 }}>{redScore}</div>
+          </div>
+        </div>
+      </div>
+
+      {headerTabs}
+
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+        {[['stats', 'スタッツ'], ['positions', 'キル・デス位置'], ['postplant', 'プラント後']].map(([k, label]) => (
+          <div key={k} onClick={() => setMatchView(k)}
+            style={{
+              padding: '8px 18px', borderRadius: '4px', fontSize: '13px', fontWeight: 700,
+              cursor: 'pointer', letterSpacing: '0.02em',
+              border: `1px solid ${matchView === k ? '#9B8CFF' : '#2A333B'}`,
+              color: matchView === k ? '#9B8CFF' : '#5A6570',
+              background: matchView === k ? '#9B8CFF14' : 'transparent'
+            }}>
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {matchView === 'positions' ? (
+        <PositionMapView dashboard={MATCH_DATA} mapMetaCache={mapMetaCache} setMapMetaCache={setMapMetaCache} />
+      ) : matchView === 'postplant' ? (
+        <PostPlantMapView dashboard={MATCH_DATA} mapMetaCache={mapMetaCache} setMapMetaCache={setMapMetaCache} />
+      ) : (
+      <React.Fragment>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+        {['total', 'attack', 'defense'].map(k => (
+          <div key={k} onClick={() => setSide(k)}
+            style={{
+              padding: '8px 18px', borderRadius: '4px', fontSize: '13px', fontWeight: 700,
+              cursor: 'pointer', letterSpacing: '0.04em', textTransform: 'uppercase',
+              border: `1px solid ${side === k ? SIDE_ACCENT[k] : '#2A333B'}`,
+              color: side === k ? SIDE_ACCENT[k] : '#5A6570',
+              background: side === k ? `${SIDE_ACCENT[k]}14` : 'transparent'
+            }}>
+            {SIDE_LABEL[k]}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
+        {[
+          { label: 'MVP (ACS)', name: mvp.name, sub: `ACS ${mvp.total.acs}`, accent: '#FFD166' },
+          { label: 'MOST FIRST KILLS', name: topFK.name, sub: `${topFK.total.fk} FK`, accent: '#5CC8FF' },
+          { label: 'MOST FIRST DEATHS', name: topFD.name, sub: `${topFD.total.fd} FD`, accent: '#F5A623' },
+        ].map((h, i) => (
+          <div key={i} style={{ flex: '1 1 200px', border: `1px solid ${h.accent}44`, borderRadius: '6px', padding: '12px 16px', background: `${h.accent}0D` }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: h.accent, letterSpacing: '0.08em' }}>{h.label}</div>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: '#F2F5F7', marginTop: '2px' }}>{h.name}</div>
+            <div style={{ fontSize: '12px', color: '#8B9AA8' }}>{h.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {renderTeamTable('Blue')}
+      {renderTeamTable('Red')}
+
+      <div style={{ marginTop: '8px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', borderLeft: '3px solid #9B8CFF', paddingLeft: '10px' }}>
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#9B8CFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Site Breakdown</span>
+          <span style={{ fontSize: '13px', color: '#6B7885' }}>設置サイト別のアタッカー勝率</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '12px' }}>
+              全体（{MATCH_DATA.rounds_played}ラウンド）
+            </div>
+            {siteKeys.map((site, idx) => {
+              const s = siteOverall[site];
+              const palette = ['#FF9F45', '#5CC8FF', '#4ADE80', '#F5A623'];
+              const accent = site === 'None' ? '#5A6570' : palette[idx % palette.length];
+              return <SiteBar key={site} label={siteLabel(site)} rounds={s.rounds} rate={s.attacker_win_rate} accent={accent} />;
+            })}
+          </div>
+
+          <div style={{ flex: '1 1 380px', border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '12px' }}>
+              攻撃チーム別
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #1E262E' }}>
+                  <th style={{ textAlign: 'left', padding: '4px 8px', color: '#6B7885', fontSize: '11px', textTransform: 'uppercase' }}>チーム</th>
+                  {siteKeys.map(site => (
+                    <th key={site} style={{ textAlign: 'center', padding: '4px 8px', color: '#6B7885', fontSize: '11px', textTransform: 'uppercase' }}>{siteLabel(site)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {['Red', 'Blue'].map(team => (
+                  <tr key={team} style={{ borderBottom: '1px solid #161B21' }}>
+                    <td style={{ padding: '8px', fontWeight: 700, color: TEAM_COLOR[team] }}>{team}</td>
+                    {siteKeys.map(site => {
+                      const s = siteByTeam[`${team}_${site}`];
+                      return <td key={site} style={{ padding: '8px', textAlign: 'center', color: '#EDEFF2' }}>{s ? `${s.win_rate}% (${s.wins}/${s.rounds})` : '\u2014'}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '8px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', borderLeft: '3px solid #9B8CFF', paddingLeft: '10px' }}>
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#9B8CFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Round Type Breakdown</span>
+          <span style={{ fontSize: '13px', color: '#6B7885' }}>ラウンドタイプ（ピストル/エコ/フォース/フルバイ）別の勝率（全体・チーム別）</span>
+        </div>
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+          <RoundTypeCard breakdown={MATCH_DATA.round_type_breakdown.overall} title={`全体（${MATCH_DATA.rounds_played * 2}チーム・ラウンド分）`} />
+          <RoundTypeTeamCard byTeam={MATCH_DATA.round_type_breakdown.by_team} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: '8px', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', borderLeft: '3px solid #9B8CFF', paddingLeft: '10px' }}>
+          <span style={{ fontSize: '15px', fontWeight: 700, color: '#9B8CFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Post-Plant Positioning</span>
+          <span style={{ fontSize: '13px', color: '#6B7885' }}>プラント時点の防衛側の位置と勝率の関係</span>
+        </div>
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+          <PostPlantCard postPlant={MATCH_DATA.post_plant} />
+        </div>
+      </div>
+
+      <p style={{ fontSize: '11px', color: '#4A545E', marginTop: '8px' }}>
+        FK = そのラウンドで最初にキルを取った回数 / FD = そのラウンドで最初に落ちた回数 \u00b7 ACS = スコア \u00f7 ラウンド数 \u00b7 アタック/ディフェンスはスパイク設置チームからラウンドごとに自動判定
+      </p>
+      </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+
+
+</script>
+<script>
+  (function () {
+    const source = document.getElementById('app-source').textContent;
+    const transformed = Babel.transform(source, { presets: [['react', { runtime: 'classic' }]] }).code;
+    const script = document.createElement('script');
+    script.textContent = transformed;
+    document.body.appendChild(script);
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(MatchDashboardApp));
+  })();
+</script>
+</body>
+</html>
