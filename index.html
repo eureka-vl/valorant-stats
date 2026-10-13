@@ -1476,6 +1476,160 @@ function PostPlantMapView({ dashboard, mapMetaCache, setMapMetaCache }) {
   );
 }
 
+// ---------- CSV 保存/復元（試合データを入れ子の配列ごとに複数のCSVへ分割）----------
+const CSV_KEYS = ['match_id', '_idx', '_parent'];
+const csvRawMatch = (mj) => (mj && Array.isArray(mj.data) ? mj.data[0] : (mj && mj.data) || mj);
+const csvMatchId = (mj) => { const m = csvRawMatch(mj); return m && m.metadata ? (m.metadata.matchid || m.metadata.match_id) : null; };
+// 値 -> セル文字列（空欄 = 項目なし / null は「null」）。数値や true に見える文字列は JSON 形式で引用して区別する
+function csvEnc(v) {
+  if (v === null) return 'null';
+  if (typeof v === 'string') return (v === '' || /^(-?\d+(\.\d+)?([eE][+-]?\d+)?|true|false|null|[\[{"])/.test(v)) ? JSON.stringify(v) : v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  return JSON.stringify(v);
+}
+function csvDec(c) {
+  if (c === '') return undefined;
+  if (c === 'null') return null;
+  if (c === 'true') return true;
+  if (c === 'false') return false;
+  if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(c)) return Number(c);
+  if (/^[\[{"]/.test(c)) { try { return JSON.parse(c); } catch (e) { return c; } }
+  return c;
+}
+const csvEsc = (c) => /[",\r\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+
+function csvBuildFiles(rawList) {
+  const tables = {};
+  rawList.forEach((mj, n) => {
+    const mid = csvMatchId(mj) || ('match' + n);
+    const walk = (obj, tname, idx, parent) => {
+      const row = { match_id: mid, _idx: idx, _parent: parent };
+      const pid = parent === '' ? String(idx) : parent + '/' + idx;
+      const visit = (o, prefix) => Object.keys(o).forEach(k => {
+        const v = o[k], key = prefix + k;
+        if (Array.isArray(v) && v.length && v.every(x => x && typeof x === 'object' && !Array.isArray(x))) {
+          v.forEach((c, i) => walk(c, tname + '__' + key.replace(/\./g, '--'), i, pid));
+        } else if (v && typeof v === 'object' && !Array.isArray(v)) visit(v, key + '.');
+        else row[key] = v;
+      });
+      visit(obj, '');
+      (tables[tname] = tables[tname] || []).push(row);
+    };
+    walk(csvRawMatch(mj), 'match', 0, '');
+  });
+  return Object.keys(tables).map(tname => {
+    const rows = tables[tname];
+    const cols = [...CSV_KEYS], seen = new Set(cols);
+    rows.forEach(r => Object.keys(r).forEach(k => { if (!seen.has(k)) { seen.add(k); cols.push(k); } }));
+    const lines = [cols.map(csvEsc).join(',')];
+    rows.forEach(r => lines.push(cols.map(c => r[c] === undefined ? '' : csvEsc(CSV_KEYS.includes(c) ? String(r[c]) : csvEnc(r[c]))).join(',')));
+    return { name: `valorant_${tname}.csv`, text: '\ufeff' + lines.join('\r\n') + '\r\n' };
+  });
+}
+
+function csvParse(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); cell = ''; if (row.length > 1 || row[0] !== '') rows.push(row); row = []; }
+    else cell += ch;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+// files: [[ファイル名, テキスト], ...] -> 試合JSONの配列（match_id ごとに復元）
+function csvRebuildMatches(files) {
+  const tables = {};
+  files.forEach(([fname, text]) => {
+    const mt = /^valorant_(.+?)(?: \(\d+\))?\.csv$/i.exec(fname.split(/[\\/]/).pop());
+    if (!mt) return;
+    const rows = csvParse(text);
+    if (rows.length < 2) return;
+    const cols = rows[0], list = (tables[mt[1]] = tables[mt[1]] || []);
+    rows.slice(1).forEach(cells => {
+      const r = {};
+      cols.forEach((c, i) => {
+        const raw = cells[i] === undefined ? '' : cells[i];
+        if (c === 'match_id' || c === '_parent') r[c] = raw;
+        else if (c === '_idx') r[c] = Number(raw);
+        else { const v = csvDec(raw); if (v !== undefined) r[c] = v; }
+      });
+      list.push(r);
+    });
+  });
+  if (!tables.match) throw new Error('valorant_match.csv が見つかりません（保存したCSVをまとめて選択してください）');
+  const rowKey = (r) => r.match_id + '|' + (r._parent === '' ? String(r._idx) : r._parent + '/' + r._idx);
+  const objs = {}, names = Object.keys(tables);
+  names.forEach(t => {
+    objs[t] = {};
+    tables[t].sort((a, b) => a._idx - b._idx).forEach(r => {
+      const o = {};
+      Object.keys(r).forEach(k => {
+        if (CSV_KEYS.includes(k)) return;
+        const ks = k.split('.'); let c = o;
+        ks.slice(0, -1).forEach(x => { if (c[x] === null || typeof c[x] !== 'object') c[x] = {}; c = c[x]; });
+        c[ks[ks.length - 1]] = r[k];
+      });
+      objs[t][rowKey(r)] = o;
+    });
+  });
+  names.filter(t => t !== 'match').forEach(t => {
+    const segs = t.split('__'), parentName = segs.slice(0, -1).join('__');
+    const ks = segs[segs.length - 1].replace(/--/g, '.').split('.'), last = ks[ks.length - 1];
+    tables[t].forEach(r => {
+      const par = objs[parentName] && objs[parentName][r.match_id + '|' + r._parent];
+      if (!par) return;
+      let c = par;
+      ks.slice(0, -1).forEach(x => { if (c[x] === null || typeof c[x] !== 'object') c[x] = {}; c = c[x]; });
+      (c[last] = Array.isArray(c[last]) ? c[last] : []).push(objs[t][rowKey(r)]);
+    });
+  });
+  return tables.match.map(r => ({ status: 200, data: [objs.match[r.match_id + '|0']] }));
+}
+
+// ---------- GitHub リポジトリの試合データ(JSON)を自動読み込み ----------
+// dirs: 読み込むフォルダ（''=リポジトリ直下）。新しいJSONをpushするだけで、次回表示時に自動で反映されます
+const AUTO_LOAD = {
+  enabled: true,
+  owner: 'eureka-vl', repo: 'valorant-stats', branch: 'main',
+  dirs: ['', 'data'],
+  ignore: ['package.json', 'package-lock.json', 'tsconfig.json', 'manifest.json', 'vercel.json'],
+};
+
+async function githubFetchJsonFiles(cfg, force) {
+  // GitHub APIは認証なしだと1時間60回までなので、ファイル一覧は10分間キャッシュし、上限に当たったときは古いキャッシュで続行する
+  const key = `gh-list:${cfg.owner}/${cfg.repo}@${cfg.branch}`;
+  let cached = null;
+  try { cached = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (e) {}
+  let list = cached && !force && Date.now() - cached.t < 10 * 60 * 1000 ? cached.list : null;
+  if (!list) {
+    try {
+      list = [];
+      for (const dir of cfg.dirs) {
+        const r = await fetch(`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${dir}?ref=${cfg.branch}`);
+        if (r.status === 404) continue; // フォルダが無ければ読み飛ばす
+        if (!r.ok) throw new Error(r.status === 403 ? 'GitHub APIの利用上限に達しました。しばらく待ってから再試行してください' : `GitHub APIエラー (${r.status})`);
+        (await r.json()).forEach(f => {
+          if (f.type === 'file' && /\.json$/i.test(f.name) && !cfg.ignore.includes(f.name.toLowerCase())) list.push({ name: f.name, download_url: f.download_url });
+        });
+      }
+      try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), list })); } catch (e) {}
+    } catch (e) {
+      if (cached && cached.list) list = cached.list; else throw e;
+    }
+  }
+  return Promise.all(list.map(async f => {
+    const r = await fetch(f.download_url);
+    if (!r.ok) throw new Error(`${f.name} の取得に失敗しました (${r.status})`);
+    return { name: f.name, text: await r.text() };
+  }));
+}
+
 function UploadScreen({ onFiles, error, hasExisting, onCancel, onFetchApi, apiLoading }) {
   const [authed, setAuthed] = useState(false);
   const [inputPass, setInputPass] = useState('');
@@ -1590,13 +1744,13 @@ function UploadScreen({ onFiles, error, hasExisting, onCancel, onFetchApi, apiLo
             クリックして選択、またはドラッグ＆ドロップ
           </div>
           <div style={{ fontSize: '12px', color: '#6B7885' }}>
-            .json ファイルを複数選択可能（個別の試合データ、またはエクスポート済みのまとめファイル）
+            .json / .csv ファイルを複数選択可能（CSVは保存したvalorant_*.csvをまとめて選択）
           </div>
         </div>
         <input
           ref={inputRef}
           type="file"
-          accept="application/json,.json"
+          accept="application/json,.json,text/csv,.csv"
           multiple
           style={{ display: 'none' }}
           onChange={(e) => { const files = Array.from(e.target.files || []); if (files.length) onFiles(files); }}
@@ -2549,6 +2703,20 @@ function MatchDashboardApp() {
 
   const handleFiles = useCallback((files) => {
     setError(null);
+    const csvFiles = files.filter(f => /\.csv$/i.test(f.name));
+    if (csvFiles.length) {
+      Promise.all(csvFiles.map(f => f.text().then(t => [f.name, t]))).then(list => {
+        const errs = [], nm = [];
+        try {
+          csvRebuildMatches(list).forEach(mj => {
+            try { nm.push(processMatchJson(mj, 'CSV:' + csvMatchId(mj))); } catch (err) { errs.push(err.message); }
+          });
+        } catch (err) { errs.push(err.message); }
+        commitNewMatches(nm, errs);
+      });
+      files = files.filter(f => !/\.csv$/i.test(f.name));
+      if (!files.length) return;
+    }
     let pending = files.length;
     const newMatches = [];
     const errors = [];
@@ -2676,6 +2844,19 @@ function MatchDashboardApp() {
     }
   }, []);
 
+  const [autoStatus, setAutoStatus] = useState(AUTO_LOAD.enabled ? { state: 'loading' } : null);
+  const autoLoad = useCallback(async (force) => {
+    setAutoStatus({ state: 'loading' });
+    try {
+      const got = await githubFetchJsonFiles(AUTO_LOAD, force === true);
+      if (got.length) handleFiles(got.map(f => new File([f.text], f.name, { type: 'application/json' })));
+      setAutoStatus({ state: 'done', files: got.length });
+    } catch (e) {
+      setAutoStatus({ state: 'error', text: e.message });
+    }
+  }, []);
+  React.useEffect(() => { if (AUTO_LOAD.enabled) autoLoad(); }, []);
+
   const handleExport = () => {
     const bundle = matches.map(m => m.raw);
     const blob = new Blob([JSON.stringify(bundle)], { type: 'application/json' });
@@ -2688,6 +2869,16 @@ function MatchDashboardApp() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleExportCsv = () => {
+    csvBuildFiles(matches.map(m => m.raw)).forEach((f, i) => setTimeout(() => {
+      const url = URL.createObjectURL(new Blob([f.text], { type: 'text/csv;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = f.name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, i * 350));
   };
 
   const handleRemoveMatch = (id) => {
@@ -2778,6 +2969,25 @@ function MatchDashboardApp() {
           ⬇ エクスポート
         </div>
       )}
+      {matches.length > 0 && (
+        <div
+          onClick={handleExportCsv}
+          title="読み込み済みの全試合をvalorant_*.csvに分けて保存します。保存先フォルダの既存CSVを先に読み込んでから保存すると、データが累積されます"
+          style={{ padding: '8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: '1px solid #2A333B', color: '#4ADE80', marginLeft: '8px' }}
+        >
+          ⬇ CSV保存
+        </div>
+      )}
+      {matches.length > 0 && AUTO_LOAD.enabled && (
+        <div
+          onClick={() => autoStatus && autoStatus.state === 'loading' ? null : autoLoad(true)}
+          title={autoStatus && autoStatus.state === 'error' ? autoStatus.text : `GitHub（${AUTO_LOAD.owner}/${AUTO_LOAD.repo}）のJSONを再取得します。取り込み済みの試合は重複しません`}
+          style={{ padding: '8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: '1px solid #2A333B', marginLeft: '8px',
+            color: autoStatus && autoStatus.state === 'error' ? '#FF6B6B' : '#9B8CFF' }}
+        >
+          {!autoStatus || autoStatus.state === 'done' ? '↻ GitHub更新' : autoStatus.state === 'loading' ? '⟳ 読み込み中…' : '⚠ 取得失敗（再試行）'}
+        </div>
+      )}
     </div>
   );
 
@@ -2849,7 +3059,17 @@ function MatchDashboardApp() {
 
         {matches.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: '#8B9AA8', border: '1px solid #1E262E', borderRadius: '8px', background: '#12171D' }}>
-            <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', color: '#EDEFF2' }}>試合データがまだありません</div>
+            <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px', color: '#EDEFF2' }}>
+              {autoStatus && autoStatus.state === 'loading' ? 'GitHubから試合データを読み込み中…' : '試合データがまだありません'}
+            </div>
+            {autoStatus && autoStatus.state === 'error' && (
+              <p style={{ fontSize: '13px', color: '#FF9B9B', marginBottom: '8px' }}>
+                GitHubからの自動読み込みに失敗しました：{autoStatus.text}（<span onClick={() => autoLoad(true)} style={{ color: '#9B8CFF', cursor: 'pointer', textDecoration: 'underline' }}>再試行</span>）
+              </p>
+            )}
+            {autoStatus && autoStatus.state === 'done' && autoStatus.files === 0 && (
+              <p style={{ fontSize: '13px', marginBottom: '8px' }}>リポジトリにJSONファイルが見つかりませんでした。</p>
+            )}
             <p style={{ fontSize: '13px', marginBottom: '20px' }}>右上の「⚙ 管理者ページ」から試合データのJSONをアップロードするか、APIから取得してください。</p>
             <div
               onClick={() => setShowUpload(true)}
