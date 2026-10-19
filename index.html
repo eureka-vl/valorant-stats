@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Valorant Match Dashboard</title>
+<link rel="icon" type="image/png" sizes="64x64" href="data:image/png;base64,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" />
+<link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAApOklEQVR42u2dd3hUZdrGf6dOSQIhoQihhWqhF+mKuva2uqvrut8Wv/10LbvirrqoC7pg773rKhbsBQsq9kILvYj0JkgLkJBkMjOnfX+cYgJxHULKTHjv65pLEMLMnHOf532e+2lSXvuuDgICTQSyuAQCgtACAoLQAgKC0AICgtACgtACAoLQAgKC0AICgtACAoLQAoLQAgKC0AICgtACAoLQAgKC0AKC0AICgtACAoLQAgKC0AICgtACgtACAoLQAgKC0AICgtACAoLQAoLQAgKC0AICgtACAoLQAgKC0AKC0AICgtACAoLQAgKC0AICgtACgtACAmkMtSl9GUmSvP8CSHX6bzuOg+M4jfKd/O9V53AcnCrfTxA6jUgMYNsOlmVh2xa2bWM7Dng36kBvl6Zq6LrW4N8vkUxiGgZ1RTcJCUmWkCUJSZKRZQlFUZBludrDKwjd0L6SJCErMpZlY5gmEqBpGocf1pNhRw6iS2FnCtq1JTsrC0mSUNVafFX/xkoSU96dyn+efxFFUerdWvtW2bIsLvj9+Zx9xmkoPuFqaa0dx0GSJGKxGBu/38SmH7awbft2lq9YxbffLSeZNJAkUFUVRVGwbTsjiZ1xhJYkCVmWsSyLZCJJNBxm1IhhjB41gq6FhRS0a0vrVi3Jyc4mJzsLSa6bMGHFytXB+zfEjfZPnp7dujJ61Ig6/beThkFZWRkVFTF27d7N5h+28t2KlXz86ecsWLyERDKJqigZSeyMIrQiyzhAPJ6gVct8TjnxF5x60gn0Ovxw2he03efvm6aJbZrIslwrP9S/kZIkURmPN8p3jicSJBIJFEXZx8Wq7YOiaxr5eXnk5+XRsUN7+vXpzaknHc+vzjyNb79bwetvv8PHn35OeUUFuq4jSRK2bQtC15m1AmRFwTAMZFnm12edwe9/ey79+/QmN7e55z/bWJaNJIEsy8iyXDs34ycILddXYJYCARXPWtYFoasGuG6IYeM4oCgyhZ07Udi5E4MH9uf8c3/Fy6+/yZT3PsC2bTRNw7IsQei6uqGxWIwe3boy5rKLOeXE42mZnxdYYd8N0bQmJdo0kHIiByQ3LQschzatW3HCcccwoF9fjhk1kvseeZyVq9cQjUSwLCutXZC0ZoDvKpRXVHDmqSfzj79dyqAB/QAwTBMlBSvsVA3uammhGxVO3UmG/826S5KE6p0ClmVjWib5eS34/fm/oVPHDtx85z3MmFVENBpNa1KnLaEVWcZ2HGzb5rKL/sw//nYJh7Rpg2maIEloVYi898X98Uh1AunOP1b3R6XwlQHfpWlsa2rbdsouR9Wfc6VMG8kzEBI169v+793rpJNMJpFlhaNGDqegoC0PPvokT016gWg4jAPutRWEToHMiuISF7ju6r/zt4svJBQKYZomiqL85E11vAfAsixUVa3ResfjCTfIceyUCS1JEqZlNrxpBmKVlcTjCTRNxdoPQsve57Zth3A4VON3M0zTlT9/ImjWdT1wRboWFjJx3LWEw2GenvQ8tuMgy3LaBYtSXvuuTrqROZFIkNcil6uvuJy//N+fkCUJ07KqWeWqsG07+HP/xiSSSRYtXsqCRYtZtWYtyaRBZWUlFbEYsiyneGQ6gIQkwdr1G1ixcnWDynaO49ClsBPdunQJJLTULbSbRLEdh0g4TH5+Cw5pcwitW+XTpXNnBvbvi67r7vVz3ISU+l+MRTJpeAS2eOypZ7nx9jsxTSvtgsW0IbQf/MXjcboWFnLtVWM45+xfkkgmA6mpJitjWVZgtRPJJJ998RUzi+ayYeP3rFm7jjXr1lNSUoLjEGTIHPYvMe7gJhw0teEPNNM0MU2zVp/ZV4hctwui0QjNcnI4pE1revboRrcuXRg+dDBHjRiOqqpudtV2UFWlxmtdEYsR0kOoqsLj/5nEbXffR0lpKSFdxzQtQei9A5KKWIyePbpx64TrOf7Y0a6ObDv7pJz9Y9D/ud0lJbz25hRmzJ7D/IWLWL1mHQCapgauR+pWmZ88BRrDEsmy7GYJayvXeW6Tf83872EYJooi071bVwb068tJxx/LmaeejKZpJJLJfQJuX+YzTANFUVAVhcmvvsH4ibewo7iYSCSCZVo4OAc3oX3LXFFRwYhhQxn3z38wasQwLI+wcg2ZvkQySUjXSSSTTHnvA95+530+/+prSkr3EA6HqiUDMjWFWy8PhySB51v7/m8yaZBIxGlfUMDI4UM5+4xTOf2Uk4LToaY4xL+miqLw9rtTufmOe1i+chXRaOPLekqkWd6/G1OWczXmSs464xRumTCegf37umT2kiP7WGbTRNd11q7fwO133c8Djz7BvAWLUFSFaCSC7NVACCLX7IYE6o9t4wCaqhKJhKmoiDF/4WLmzltA8a6dtC8ooGV+fhA4VvWtA/XEtjn80J4ccVhP1m/YyJp16wiHQgcnoX2yxuNxfvXL07ntxusp7NTJ1ZcVZZ/MnB8QKYrC1I8+5oabbmPK+1NJGgZZWVEcy0570T8tSe6RW5ZlsrKilO7Zw9fTZ7Jy1Wo6dCigsFPHahnTakErYJkmnTt1ZEC/vvywZQvLlq8gHA7XKKc2WUL7WrAkSfzlz3/i+uuu5pDWrTHNmiNtP/AzTZOnnn2eG266jaXLviMajbqSmmkhaHzgxPblTl3XWblqNbPnzqdVfj5HHHYohmEGEqZPVFfukzEti0Nat2Lo4EFs2badRYuXoGlagylCjUpoRVEwTBMchzGX/oXx11xFs5wc72L+NJkty+KeBx7h5jvupqy8gqxoFoZpCItcD8R2HFe73r59BzNnzyEvrwX9+/YO7od/uvoEV7zqx9zc5owYOgTTsli85Nvg3jXkPWpQQquqSiKRID8vL0iY6LqOZdk1SkV+ULJr927uuu8hHnzsSUzLRNd0DNMQ7KtH2LZNKBSirKyMOfPmI0kSA/r1CXTnvZMxfklvTnY2xxw1Esu2mFk0F9OrdmxyhJYkiXg8TvuCdtx0/XVc8Pvzg4tQU1GRYZpoqsr3mzYz8bY7eXrSC9iOjSIrbhFNLd7fr8I7WF4HWpln2za6rlNWXs7XM2cRjyfodcThZGdnVbPUe5NaUVWGDBqIqqosXLyURDLZYKRuUNmua2Fnrv775Zxz1hkYhoEkyftYZsdxSCYNQiGd1WvX8e+bb+fdqR8GUlyqWrBPYMXTnw3TDJQPX1NFgqbnfDtuzUaVa6B6GVS/xHZ/v7SqKtiWg2mZ/O68cxk/9kratG6FYRiBrFe17sWy7eC6v/LGW/zjmvHE4/EGcT/UhrDMlmURDoe5csxlnHX6KZh+mrUmWc6yCIV05s5fwMRb7+LLb6YHKdpUyOwrIY5jk0gkvGAGsrKyaHtIG0KhEOFwiJzsbK8OQWoyVPZrwfeUlZGIJ4gnEmzfUUxZeTk4bqIpFNKRZcUNpFMkl2m6vrAqqbz06utUVFQw9h+Xc2iP7sQTiX0DeU85SSaTlJWVVyN7vbu1DRFkSJKEZVvMnb+Q448ZTV5eC1eG20c+ctBUlQ8//pQJt9zBkm+XEY1GU9aUVc8CVMRiKLJM315HMKB/Xw5p04bWrVvS7pBDCIfDhMMhLxC1mw6ZPUYrikxJaSnxeJzKeIItW7ayY+dOtm3bwdz5C1i09FtsyyISiVQrAvs5+C6GLMu88fY77CguZuK4axjQry/xeAJVVQKXww/+H33qGW6+424chwPO1KaVyyEBNmCZFmMuvYh/jb3SPQY9v6tq5unNKe8xdty/2bpjB9FIJKULLnk3Mh53W5WGDRnMUcOHcfSoEQwZPLDBrEO6o2jeAj774kuK5s5nxuwiKipiZGVFMYzUKwl9N6ayspLeRxzOTddfx7GjjyKZNMAriNI0ldfemsLfx44jFosFhVVNyof2g5R4IsEN1/6TKy+/NCi8CYVCSJLE62+/w7XX38iO4mLCoZAr76Xw74KboOnRvRvnnHUm551zNp07dgAgmUziOA6yogRWDIdGrzmoFwvt/crB+TE88GrCq9ZmbNm6jXemfsgLL7/K/AWLyMrKAsfB2g/SqapCRUWMjh07cMeNN3DaySdiGCaapvLF19O5dMxVbNm2DV3XGrRwqUGDQt8ah0MhbrrhX/zpf36LJEmUlZXz/Muvcs8DD1O8cxehUGrVW74+bVkWR48cwVVX/JVRw4cGKolSQ/r8YIafSfWJvWTpMm68/S4+/PjToJpwfxQkVVWJJxK0aN6c22+6gd/86iymz5rNNeMn8u2y71AbobS0QXVo361IJJJ8PX0mnTt3pEVuLg8+9iS33X0/lZVx9BRLETVNJZk00DSNP55/Hv8eN5a+vY6odtOEq7GvQfGNSiKRpKBdW44eNYJEMsnadespr6ggHAqlbKmrynrzFiyitHQPTz7zPAsWLQ6aAxr8pGqMajs/GClo15YjDjuUL7+eTtIwUFUlRTJrxGIx8vPyuOTCC/jrXy4kGo38ZHWYQM3GJZ5IEA6FcRybZ194idvvfYDNm38gJzsbwzRTJmQwJyWZDCx9Y7VnNVr5qC/nWZYVyHI/dwGrdoB369qFKy+/jPPP/TWyLAVSoEDqhLZtB8t2r5ssy7z3wTRuveteFi1ZSiQSCaxwqqR2+0DtRlWPGrV8VFEUNE1LqWlVUdygsqKigqFHDuLOmydy2kknBD+rCDLvt0Hx59q5/rXNoT27M/TIQWzespVVq9dU0fSdFB+Qxi/ZbVRCp0JkB9AU1xUxTJNTTjyeu26ZSP++vTHNH7VRgQMjtyRJJBIJ2rU9hONGj2L37lK+W7ECw3DjlEyZnNSohE4FuqYRj8fJa9GC3//2XG6dOJ4O7Qu8Cy0CvzoltiyTNAya5eQwetQIFEVm6bLl7CkvJ6zrGUHqtCW0LEmomkZ5RQUdO7Tn+muu4h9/u5SsSATDcruN080n9a2df/T6LWD7toI5afkgSvxY3hsK6QwfeiQt8/NZvnwF24uLCTVyN0rGElpRZMAdkNi31xHcOmE8Z51xmksSSLvgzy2Od6cNGYaBhBSkgmuqgJMkSBpmtbEEjU1w3+3Y22/u16cXvQ4/jBWr1rB+wwY0TXM759OU2Gk3l0OSJHfesyRxwrGjmTDuGg7r2cNrmnUHdKcbmU3TAolqYw5KSkspLd1DRSyGbTtIEu6I35wcmjfLCfx+/+dram5IlwdVVRVWrlrNuIm3MO2zL8DT+dOR1GlFaP+Gtm7VkhN/cSzjr7mKvBYtgi7vdMPenelr1q1n7br1bP5hCwsXL2Hjps1s374Dy7aQJZm2h7ShXdu2dGjfjv59+9C+oB1dCzsHQZftOGkpPfq16bt272bCrXfy4bRP2LW7pNHWdGQEof3jzjAMTjnxeB65705ymzenIhYjGomklfWyHQfHtgPJa/HSZcxfuIjX33Jng/w3Bcf/HpqmcWiP7px60gkcN3oUgwb0d8njjQxOJxnSAUxP7Sgvr+Dyq6/lzSnvpiy5NiTSJq3ml5nKskzR3HksW76CYUcORlVU0qlm2Y/0FUVh3foNTPvscx5/ehJr161HktxKM38E10/1D/iB45Jvl7FoyVKem/wyf734Qk4+/jg6d+qI6SWc0oXUUpUHceXqNSz9dlnw+3Sz0GkXFCqKQnlFBeVl5Rw1cgQ5OdnukZ0GWrPttbnIssyM2UVcfd0NPPvCS5SWlaFrGpJX8+veZLfKzdnrBU4w3VdRFDRVpaysnGmffsGiJd/Sru0hdO7YIW2CRd+1UhWFHTt3MeGWO5g5ew66Z52FypHKsaEofLdiJXl5eQwe0K/aCNjGs8xuYCfJEq++8RbXjJ/I0mXfEfZKX+1aHL2Ot1ZN8ko7N2z8nqnTPqFZTg4D+/cNHoJ0+N7IMs9NfoWHn3iakK7X6vsetIT25znMW7CIAf36UNipYxCANYbVsqp01zz34suMm3AzW7dvJxQK1Um61/95zSvHnDGriPy8FvTv2yeYl9FYJ5Tv+sxbsJAbbrqNsrIyZO8BTkekJaEdx0HTVCorK9lRXMxRI4fTLCcnGEvV0KT2q/g++vQzrrj6OneZTj3U+joOKKpCIpnkm5lF9OzelR7dumIYZp10cdfmeyuKwvYdxdx4210UzZ2HrmlpS2ZI49XIluXW2n76xVe89tYU9+mTZe8IlBrUQumaxvKVq7j7/keoiFXW20xkhx+nF5WXlzNuwi3MW7CIcDjU4IXyQdJHgjfefod33v+QkFcr7QhC185K27aNosjc/cDDfPbl18HA7Ya8qbIsE4tV8sxzL7oWSq//LgzbttE1jbXrN/DQY0+ybfsONLVhuz9sT5acN38RTzzzHIoiZ8QAzLQuU7NtG1VRKS3dw933P8zGTZvQdX2/mjoPVNWQJInps2bz4quvB0PB6/umOl5/Xzik884HHzKzaA4ODReE+cNitm3fwQOPPsG6DRszpuIu7esuLa8HcfqsIt54+11M03L7XOv55lqWjaoo7Ny1i5dff5Py8go33dtAN9VXQBzb4fnJr7B5yxZUVXWn+dfDd6+6n8b9HzYvvfYGU96b6rZlZcCOwowgtG+tVFXh3oce4+PPPkdV1XrvinC8pUKLly5j2qefBw25DXng2raNqqp8PWMW3y5bXk0RqbdA0FM1ZhXN47GnnvHilsyZtZ0RlfGu66FQVlbGvQ89ypq167z+Q7PeHiJVVUkaBt/MnEVZWXmj1Vj45QBffjODiljM7derh1NC8hYz6ZrG9uJiHn3qGbZu3YaWIXXQGUXoqq7HrDnzmPzqG0G3Sn1Yar/refPmHyiaOx+QGqVmoep7zluwkM0/bIF62rtt27arL9s2L778Gu+8/wHhcDhjXI2MI7TvemiqyhPPPMenX3yJLMuY9TAj2veTv9+8mcVLv0WWGzeRIMsSy1euYvuO4iBoq2v4gxc//fIr7n7gEbczPwM3ImRUM15V1+O+hx5j5eo13kJOq84fHoCy8grX3WjE0Qi++7NnTzklJSVV/qBuTyRd19mydSvPvfgKZWVlaVvv3KQI7Qct4VCI6bOLePb5yd6Y1vrZaOoPrUmP0lWH3R6hZVnB7d2pu4fXcRwmv/IG7384jUgkjNXgm3MPUkL7FkVTVZ576VU+//KbOl/R65dtFhfvdG94mlgqX3+vy+fLsiwUWeaDaZ9y3yOPu3GJaZGpmz4yktC2J+OVl5dzz0OPsHzFqkCVqJtiob0lgEY3zjjAjuKdQWr8QAnnD5ZXFYXVa9bywKOPU7pnj5s8yuC9NRk70MI0XddjVtE8Jk1+2XU9ZHm/Jmj+9Ang+uQt8/M9d6ORGe29fetWLQM9/EDdIN+VcoAp73/AzNlziIbD9SaFCkKnHMxovPDSq3z+1Td1N4fYs1Bu9zlp4XLIksQhbVoHccSBEtr0dtt89MlnPPjYk26tiJ35A+AzmtC+67GnrIwHH33SVT10vVZLhaoZRI8s2dlZ5ORkpzSnut6MsyRhGmbwWerCA/IrCFeuWsN9Dz/Grp273T0qgtDp4XpEwmG+mTmLpyY9T3l5xQHPjfCL6Tu2b0//Pr0bvGS1ppOoU4cO5LVoUS1o3V8Xw6/XQJIwTZPJr77OjFlFZGVFDtgICELXteqhaUx++XU++fzLwM88EEI7jkNBu7YMHjggsJQNTeqqw18GD+xP+3btqj1wtTUAiizz/kcf8+Szz7sT9pvQrpkmQWi/dresvIKb77ibOfPmB5VptSW0YRjouk7fPr2QZanxLLQ3WXX4kCNp1iyn1u1YQa2GrrFy9RoeffI/lJWVoShqk3A1mhShfb8wEgmxbPkKXnjpNcorKpAOQJ/2CdzrsEMZduRgjAZcHlmNhKZJ395H0LdPr8B1qO1DL8sy8Xicpye94Koa0UjGqxpNltD+cZqdnc1Lr7/JlPemosgyiUSyVjXMbomqRedOHfntub8Kiv0bylJLkuQ1o8J555xNty6FwUlUu2vj7pz56NPPeeHl11BVpUmttWuShPYDn3g8zn0PP07RvPlEIuFaqRR+Px24M/bOOPVkEgl3bVxDkFrxRtsOHzKY40YfHXTC1+a9/S0Jy1esClwNVdWalKvRJAnt37xoNMqy75bz8mtvUnkAK3kVWcGyLVq3bsXll1xIp44dSCaTKPXsesiyjGGa5ORkc+WYSyns1Mnd6lUL62zbDkgSlZVxnpr0fOBqWE1E1djnnqX7wPPaWupQSGfZdyvIzs5i6OBBQRfz/lo43zK2a9uWaDTKV9/MIGkY9ba32h9XYFkW48ZeyW9+dVbg/9bWOquKwpT33ueuBx72iCxlZCXdQUtonxixykrWbdjIgP596VBQUCuFwCe04zj0PuIIopEwn3/1jXvx6rCLRfLcDN/fHXPpX7jisouDB2d/38u2HZKG4Y5gWLGSm++8lzVr17mjCJqodW7ShHYch3A4zPbiYmIVMYYPHUJWNIrtOMGwmv0htW8lB/bvS25uc2bOLiIeT6CpqjvOq5Z+tX9qyF7a3rIsLrnwf7nmqiuIRMK1Xojkp7HjiQR3P/Aw7079iEgk3ORUjYOG0D6pNVVl+arVtMhtzrAhg7Gt/Xc9/GDMJ/XggQPoVtiZ+YsWs2PnLhRvLVpVgqZC4h9nSzskk0lymzfn+mv/yeWXXOQ+fN771QaGYRDSdd6b+hF33f+Q1wTRdF2Ng4LQvuuRSCT5fvNmBvTrS4f27Q4oOWHbNjgOPXp0Z8igAUQjEVasXEVFLFZtrnNV0tb08psSTNNE0zTOOuNUbrr+On55+inoXmNqbclseTtolq9cxc133sOqNesyahTBQUnoVC2sHyBu376D8ooKRgxzXY/9kcCqDon0fVrbtmlfUMDwoUcyaGA/JCS+37SZWGWl5zrY2LY79sD3wS3LCuq1LcsmOyuLs844jfFjr+L3559Lz+7dgr+7v2T2La8vxVXG49xx74O898FHRMLhlGs1Mn2rWNrtWEnZ55SklOes+Ue7bdtce9UVXHn5ZcFekwOVCH2LvHPXLlasWs3KVWuYv3ARmzZvYfOWLWzbtt19eGSJNq1bU9C2LQUFbRnYry/du3Xh0O7dyc/PC4LB2urc/oNgGAahUIiXX3+Tv48dh5FMppwxlSTJ2wbr4Dh2RnatZBShfenKMJLupM79CJZUVSUej1PYuROPP3gPQwYNrJPd4DXtRtldUsKePWXsKSunvLzcyzL6S4OyaZaTE1TOAa62rSgHpJr4ZNZ1nVlz5jLm6uv4bvkKIpHU0tu+muM3D/ijvzLN586ITe++hbUsi0QyyfAhgxl25GDefm8q6zdsTEmKMk2TSDjM2nXrefjxp+nSuRP5eXkH5Kv6D5nsEduy3OGSLXJzaZGb+7Ofx7JsZMUddn6gdSK+m5JIJHlu8issWfotzZo1wzCMn/c7FffnCjt34penn8rX02cye85cop5rlkkZxbT3oX2/NZFI0CI3l0sv+l+uvuJvnHnaKXy/aTPzFy5GVRQcUttHrWkaq9asJSsryshhQ72BNQdeo+EHekgSjm1jeS/b85t9S+7YP+4mV1U10J4P9P0r43FCoRCTJr/E4089i6KqrnT3Mxa2qirzx9+dx7ixVzJk8EBMy2LR4qXYXmmuI1Yj1w2ZHcchFosxfMiR3HTDdfzx/N/SpnUrFEWhS2FnZs6ew8ZNmwl70/R/3hq5D8fGTZvp36c3nTq2D3zXOvnMVU4UxVM9gtdeCzjrKhCzLJd002fOZuKtd/DDlq3ouoadQvGRqrqD5X9xzGjGX3MVzZs3o1XLlowcNpSOHdqzctVqtm7bjqZrgtAHSmbLssjNbc4lF17ANVeOYcjggUiyu5jTdhxa5ueh6zpz5s0nFqsMCvN/zucNhXR27CimrKyckcOHEY1GMjbC96eUGkaSm++4h6++mUF2dnZKfrMfV3Tu1JEbr7+OXocf6rpCtk00EqZfn9707dOLWGUlK1etTqMZJRlGaNmLtJvlZHPrhPH89S8Xkp+fF9wk1VMCLMvisJ49WLNuPfMWLCQU0t1inJ8jAe7Ki9Vr1rmux/ChWAfoSzcW/FqNJ/4ziWdffAlJSk3R8B/+kB7ikgsv4LfnnB2oNsGkVcehY/v2HD1qOLqmMbNobtoTOm3voCyBkTRIJJIkkwbxRKLa1lb/2A6FdP560f/R+4jDicUq0bSfj3Md213PlkgmeXrSC3z25deoikIyaWRUZG96Mzpmz5nHY08/S2npnpROKXDrRmKxGCcdfyx//sP/eMmmH/1pRVGwPeUkOysLLUPKTdN2aZCiuPXAc+bNZ+SwIXTq2KFaAFdV+WjduhWapjF3wULi8YQ3EP3n3yMU0tlRvJOysnKOGTWSSCRc66q8hob/OXfu2s2EW+6gaO48sqLR/XI1uhR25oZ//ZPu3bp61lmtdn1sL4h+/8Np3HDL7d6weUnsWKl9oKOybXsxd973ENt3FHsNndVnUsiyTDKZ5Nyzf8noUSMoL69IOcAzTYusrCy+/GYGz7wwucFWTtQVoWVZ5qlnn+fjz75wh1amkA30CRmJRLjgf85328u8cti9ZUVNVdn8wxYefOxJSkr21PnItYOK0D6pI5EQ0z79nLfffT8Q/ateVP8GhSMh/vqXC90gJlaZUsLEJ25lZSVP/Oe5gBhGPa19qCskk8nA1Xjh5deIJxKpuxqKO0LtpF8cyx9/d15wTasaCb/Vq7Kykmeef5GieQsIh0MNurCpScp2PmFVVWHl6rUMHtCfDgX7Fhe5VtqgQ0E7DNNkxsyilAnpOA66rrO7pIRvl69gQL8+dCgowDCMalF9Q7sge39+23azeMlkknA4xJp16/nXv29mybfLCKdonX2Jrl+f3tw68Xo6dmjv7pLxSgCCmhNvbPEH0z7hljvvC5JWmXBypT2h/STEli1bMQyDo0eNIBKJ7ENqxfOnuxYWsnb9BhYuXkIkHE7piHSlvBA/bNnCsuUr6dGtK506dghaodxFPWDbVZIktlPl13X/coubbGzHrZG2HRtN19A0lQWLljB2/ARmzJqdcueMX/+iaxpjLruYk0/4BYZhomlqtUX0hmkS0nU2fL+JseMmsG79hsAVywRkRLWdKy/prFyzloJ2bel9xOE4TvUsl++K5GRn06plPtNnFbFz1y43y+WklkVUVZVNmzdTNG8BxTt30So/jzatW7sZPWWvJIki1/Prx/dSvdeSpcuY/Mrr3PvQo+4CeV1P2XJqqkpZeTlnnn4qYy69CF3T9imEcgNDmd2lpdxxzwPerOjM6j/MmOIkRZYxLYvOHTvy9KP3079vn6C4qOoN9bXUex58hLvufxjbsvZr+6mfSQQYeuQg+vfpQ15eLnktWgT/hiSBJNVv+OHq6a7LU7JnDzt2FDN/4WJmzZmLhEQkEsKyUvteqqoQi8Xp3eswnnjwXnodfhiJZJKQ90D4p5RhmIRCOq+9NYVLxlwVBIGZVKCUUdV2mqZSVlbOH84/j1smjKN5s+ZYthVUuvnJFnAr3i654mrenfohLZo3J5lCkU5VUuNAPBEP9ouHw+FqN7a+kzD+WjmQSCQS3mBKjXA4FDy4KUX9nrwZDoe5ZcJ4fvebXxOPx9F1vdp38MtpFy5eypirr2HpsuUHPFJNqBwpymxvvvOeN7lfwjLNakGborjr3lrm53PRBX+gW5dCEvs59cjyrHo4HCa3WTNysrMD3dt/1X8wLHsviaysLJo3axbs/N4fkqmqyp7yck456XjOOOUkTNNE1/VqJ4wfGJaW7uH+hx+jaO78ettnLghdQ+RvGAYPP/E0a9atJxwO71MiqaoaiUSS448dzW9+dVaNOmsK7+aqCobRqON0fU04aRj7TTBVVSmvqKBfn95cduGfycnJrqLc/LhbxcHtoHntrSlMnfYJOTk5GdtMm3EtWK7MprF67Tps22bo4EGEw+FqVtrBlZ4kCTp17MDK1WtZtmIFWZFIkxjqnZKlkmVsx6ZF81yuv/ZqjjlqZLC6rary4a+4mDN/PjfceBs7d+8+4HHEwkLXwvXIyc7mxVde5+PPvwgm9wf9eBLomptVLOzciX//ayyHH9qTilgMXdOaPJklSUJVFBKJJOf/5tecdtKJ+7R3+YMgFVWhpLSUx59+lhWrVhPSM3tEWEYS2rceSa+4aMPG71FVtYprICHLkjvN3zTp16cXN11/HW1at6KsvBxd1zKysi5VMmuaRknpHk76xXFc/OcLCIdDOFUCWV/itB0H23Z49Y23eW/qR2RnZ2X83I6M7fqu6no0b9aMIYMHosgKUL1j2r95Pbp1pUvnTqxYtTp4ADRNy/gu5719ZkmSKC0tZfRRI7nrlgl06dyJRCKJvtd3NU13LcXMWUVMvPUOdpeUpn3hUZMmtG+JVVVl5ao19OzelZ49umHZdrVhin7yxbZtDu3RnYH9+2EYBps2/8DOnbuQJFcZ0VQVSZaRZXfrVabcWEmS0LxWrlgshqqqnHbyidx24/X07N6Nyng8cLN8Qvt+c0lpKTfffjdfTZ/pVuo1gbkdGU1ox+u23l1SwtZtOzh65HBa5Oa6kzprILVhmrRv15YTjjuGgoJ2RKMRkobBrt27KSsrx7RM122pxVyMhgz2VC+DKMvug1pZGSdpJOnbuxcX/e8fGTf2Stq3a0eySvJk7+Ij07J49vnJPD3pBXRNazLBcsbN5ajxqfQqw6696grGXHYxuqYFx+/esCwLvPkTiUSSGbNmM2/hItZt2MiuXbupqKjg+80/sGHj9ylXsDW0hGeaZlAP3bJlPn16HUG/3r04+8zTGdCvT/D3qioageRpmuiaxtfTZ3LxmKvYsnVrMNxdEDqNrJbjOOQ2b86j99/F8ceOxjAMtJ9QNPwiHFVRPRfDxZ49e4hVxvnPcy9w+z0PuOOz0iT167tNhZ060qN7N3Jzm9MiN5duXbtwwrGjaV/QLiCy3ym/N/xipO3Fxfz172N5/8Np7tq6/ciipn0c0RS+hJsWVtm6bRv/ee5F+vftTcv8/P86SEbzakBMf6+1BDnZOTRr1ozWrVqlVUOon6U0TZNTTz6RsX+/nKysaLW/kzQM5CpE3vvz+8Nukskkjz/1LFM/+pjsrGiTInPGynY/dRRHo1He++Ajbr/nAeLxRLVCo70J4v9XURQ0TUVV3Gn9/tw5gHQ8ukIh3e1OMU0SiYQ3sMatw6hqlauS2Z+qpKoqU6d9wqQXX3IL9pvgJNImJcb6dc2TJr/M3Q88HIzGilXGqyVeqgaKVckdTAZVFRp/Y33NsCwL0zS8B1HzSlsVZK/uw39VXbRpejXOCxYt4d6HHmX7juK6WyMtXI76VT1kWcYyLe5/5HHi8QSXX3oRrVrme1bKRJalBiswqi/3Q0pxPYVpmsiyjKZprF2/gRtvu5M58xbQLCenybkaTZLQvpX263jve/gx1m/cyMX/9ycGDegfSFiu7+wOq5GoXuAelKBKmflA+y1UEgRB8ZffzODOex9k+qzZZEejTZbMTZLQPqklSSISCTPlvanMKprDH353HkePHE7XwkIK2rWtMVj0Z3o0y8kGx0lLTvsTQv1BMFVdJn9WiX/6fL9pM59/9Q33PfQYK9esIRqJNPmh52pT/WK+/xgOh9m1u4S77nuIx596luFDj2TokYMoaNeW3ObNCYVCLjFwu0R0XWPx0mXe0sv0C5pCoRDRSKTGP4vH4+zYuZOtW7fx3YpVvPLGW8wqmofj2AcFmaGJ6NA/G/l6S3lM0w2ofKum6zrRaBTbtpCQcHBQZIWkYRCPx9PLb/aq4845+0zO+/XZgewIIMkyJSWlbP5hC9+tWME3M2axbsNGLNsO0t72QVI2e1AQuiYpy7/JNSVN0nlykmEY7oiFGj6z327lN9dW7eY+WKByEGHvG/vflI50JYGuuzr0f/ngLtmrSJQHE1QOYmTiDXcOUqKm7F6KSyAgCC0gIAgtICAILSAgCC0gCC0gIAgtICAILSAgCC0gIAgtIAgtICAILSAgCC0gIAgtICAILSAILSAgCC0gIAgtICAILSAgCC0gCC0gIAgtICAILSAgCC0gIAgtIAgtICAILSAgCC0gIAgtICAILSAILSAgCC0gIAgtICAILSAgCC0gCC0gkMb4f+kRBwCx642/AAAAAElFTkSuQmCC" />
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -1642,7 +1644,7 @@ function UploadScreen({ onFiles, error, hasExisting, onCancel, onFetchApi, apiLo
   const [region, setRegion] = useState('ap');
   const [apiKey, setApiKey] = useState('');
   const [size, setSize] = useState(5);
-  const [mode, setMode] = useState('');
+  const [mode] = useState('custom'); // 検索対象はカスタムゲームのみ
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
@@ -1793,18 +1795,7 @@ function UploadScreen({ onFiles, error, hasExisting, onCancel, onFetchApi, apiLo
             </div>
             <div style={{ flex: 1 }}>
               <label style={labelStyle}>モード</label>
-              <select style={inputStyle} value={mode} onChange={e => setMode(e.target.value)}>
-                <option value="">すべて（指定なし）</option>
-                <option value="custom">カスタム</option>
-                <option value="competitive">コンペティティブ</option>
-                <option value="unrated">アンレート</option>
-                <option value="swiftplay">スウィフトプレイ</option>
-                <option value="spikerush">スパイクラッシュ</option>
-                <option value="deathmatch">デスマッチ</option>
-                <option value="teamdeathmatch">チームデスマッチ</option>
-                <option value="escalation">エスカレーション</option>
-                <option value="replication">レプリケーション</option>
-              </select>
+              <input style={{ ...inputStyle, opacity: 0.7, cursor: 'not-allowed' }} value="カスタム（固定）" disabled readOnly />
             </div>
             <div style={{ flex: 1 }}>
               <label style={labelStyle}>取得件数</label>
@@ -1881,6 +1872,13 @@ function finalizeAcc(a) {
   };
 }
 
+function formatDay(ts) {
+  if (!ts) return '日付不明';
+  const d = new Date(ts);
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())}`;
+}
+
 function formatDate(ts) {
   if (!ts) return '-';
   const d = new Date(ts);
@@ -1924,6 +1922,7 @@ function buildPlayerProfile(puuid, matches) {
     const agent = p.character || '不明';
     if (!byAgent[agent]) byAgent[agent] = emptyAcc();
     byAgent[agent].matches += 1; if (won) byAgent[agent].wins += 1; addRaw(byAgent[agent], p.raw);
+    byAgent[agent].rounds_won = (byAgent[agent].rounds_won || 0) + ((d.teams[String(p.team).toLowerCase()] || {}).rounds_won || 0);
     const mp = d.map || '不明';
     if (!byMap[mp]) byMap[mp] = emptyAcc();
     byMap[mp].matches += 1; if (won) byMap[mp].wins += 1; addRaw(byMap[mp], p.raw);
@@ -1950,7 +1949,7 @@ function buildPlayerProfile(puuid, matches) {
 
   if (!history.length) return null;
   const fin = (obj) => Object.entries(obj)
-    .map(([label, acc]) => ({ label, ...finalizeAcc(acc) }))
+    .map(([label, acc]) => ({ label, ...finalizeAcc(acc), rounds_won: acc.rounds_won || 0 }))
     .sort((a, b) => b.matches - a.matches || b.acs - a.acs);
   return {
     name, tag, rank, aliases: Object.keys(names),
@@ -2006,6 +2005,124 @@ function TrendChart({ history }) {
       ))}
     </svg>
   );
+}
+
+// ---------- 個人ページ: エージェント / ロール別の使用率・勝率 ----------
+
+const ROLE_JA = { Duelist: 'デュエリスト', Initiator: 'イニシエーター', Controller: 'コントローラー', Sentinel: 'センチネル', Unknown: 'その他' };
+// valorant-api.com から取得できないときの予備（新エージェントは載っていないため「その他」になる）
+const AGENT_ROLE_FALLBACK = {
+  Jett: 'Duelist', Phoenix: 'Duelist', Reyna: 'Duelist', Raze: 'Duelist', Yoru: 'Duelist', Neon: 'Duelist', Iso: 'Duelist', Waylay: 'Duelist',
+  Sova: 'Initiator', Breach: 'Initiator', Skye: 'Initiator', 'KAY/O': 'Initiator', Fade: 'Initiator', Gekko: 'Initiator', Tejo: 'Initiator',
+  Brimstone: 'Controller', Omen: 'Controller', Viper: 'Controller', Astra: 'Controller', Harbor: 'Controller', Clove: 'Controller',
+  Sage: 'Sentinel', Cypher: 'Sentinel', Killjoy: 'Sentinel', Chamber: 'Sentinel', Deadlock: 'Sentinel', Vyse: 'Sentinel', Veto: 'Sentinel',
+};
+
+// エージェント画像・ロール画像・ロール名を valorant-api.com から1回だけ取得（失敗したら画像なしで表示）
+let AGENT_META_PROMISE = null;
+function useAgentMeta() {
+  const [meta, setMeta] = useState(null);
+  React.useEffect(() => {
+    if (!AGENT_META_PROMISE) {
+      AGENT_META_PROMISE = fetch('https://valorant-api.com/v1/agents?isPlayableCharacter=true')
+        .then(r => r.json())
+        .then(json => {
+          const agents = {}, roles = {};
+          (json.data || []).forEach(a => {
+            const role = a.role && a.role.displayName;
+            agents[String(a.displayName).toLowerCase()] = { icon: a.displayIconSmall || a.displayIcon, role };
+            if (role && a.role.displayIcon) roles[role] = { icon: a.role.displayIcon };
+          });
+          return { agents, roles };
+        })
+        .catch(() => null);
+    }
+    let alive = true;
+    AGENT_META_PROMISE.then(m => { if (alive) setMeta(m); });
+    return () => { alive = false; };
+  }, []);
+  return meta;
+}
+
+function UsageRow({ row, total, accent, pad }) {
+  const usage = Math.round(1000 * row.matches / total) / 10;
+  const winColor = row.rwr > 50 ? '#4ADE80' : row.rwr < 50 ? '#FF6B6B' : '#C7D0D8';
+  const kdColor = row.kd > 1 ? '#4ADE80' : row.kd < 1 ? '#FF6B6B' : '#C7D0D8';
+  const box = { width: '40px', height: '40px', borderRadius: '6px', background: '#12171D', display: 'block', boxSizing: 'border-box' };
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '40px minmax(96px, 1.1fr) 1.4fr 78px 50px', alignItems: 'center', gap: '12px', padding: '8px 0', borderBottom: '1px solid #161B21' }}>
+      {row.icon
+        ? <img src={row.icon} alt={row.label} loading="lazy" style={{ ...box, objectFit: 'contain', padding: pad ? '7px' : 0 }} />
+        : <div style={{ ...box, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A6570', fontWeight: 700 }}>{String(row.label).charAt(0)}</div>}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#EDEFF2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.label}</div>
+        <div style={{ fontSize: '11px', color: '#6B7885', whiteSpace: 'nowrap' }}>
+          {row.matches}試合 · {row.wins}勝{row.matches - row.wins}敗{row.sub ? ` · ${row.sub}` : ''}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ flex: 1, height: '8px', borderRadius: '4px', background: '#1E262E', overflow: 'hidden' }}>
+          <div style={{ width: `${usage}%`, height: '100%', background: accent }} />
+        </div>
+        <span style={{ minWidth: '44px', textAlign: 'right', fontSize: '13px', fontWeight: 600, color: '#C7D0D8' }}>{usage}%</span>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: winColor }}>{row.rwr}%</div>
+        <div style={{ fontSize: '10px', color: '#5A6570' }}>{row.rounds_won}/{row.rounds}R</div>
+      </div>
+      <div style={{ textAlign: 'right', fontSize: '14px', fontWeight: 700, color: kdColor }}>{Number(row.kd).toFixed(2)}</div>
+    </div>
+  );
+}
+
+function AgentRoleView({ profile, meta }) {
+  const total = profile.total.matches || 1;
+  const fb = {};
+  Object.keys(AGENT_ROLE_FALLBACK).forEach(k => { fb[k.toLowerCase()] = AGENT_ROLE_FALLBACK[k]; });
+  const info = (name) => (meta && meta.agents[String(name).toLowerCase()]) || null;
+  const roleOf = (name) => (info(name) && info(name).role) || fb[String(name).toLowerCase()] || 'Unknown';
+
+  const roleMap = {};
+  profile.agents.forEach(a => {
+    const k = roleOf(a.label);
+    const x = roleMap[k] || (roleMap[k] = { key: k, matches: 0, wins: 0, rounds: 0, rounds_won: 0, kills: 0, deaths: 0 });
+    x.matches += a.matches; x.wins += a.wins; x.rounds += a.rounds; x.rounds_won += a.rounds_won; x.kills += a.kills; x.deaths += a.deaths;
+  });
+  const roleRows = Object.values(roleMap)
+    .map(r => ({ ...r, label: ROLE_JA[r.key] || r.key, icon: meta && meta.roles[r.key] ? meta.roles[r.key].icon : null, rwr: r.rounds ? Math.round(1000 * r.rounds_won / r.rounds) / 10 : 0, kd: r.deaths ? Math.round(100 * r.kills / r.deaths) / 100 : r.kills }))
+    .sort((a, b) => b.matches - a.matches);
+  const agentRows = profile.agents.map(a => ({
+    key: a.label, label: a.label, matches: a.matches, wins: a.wins, rounds: a.rounds, rounds_won: a.rounds_won,
+    rwr: a.rounds ? Math.round(1000 * a.rounds_won / a.rounds) / 10 : 0, kd: Number(a.kd),
+    icon: info(a.label) ? info(a.label).icon : null, sub: ROLE_JA[roleOf(a.label)],
+  }));
+
+  const card = { border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' };
+  const cap = { fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '6px' };
+  const head = (
+    <div style={{ display: 'grid', gridTemplateColumns: '40px minmax(96px, 1.1fr) 1.4fr 78px 50px', gap: '12px', fontSize: '11px', color: '#5A6570', padding: '2px 0 4px' }}>
+      <span /><span /><span>使用率</span><span style={{ textAlign: 'right' }}>ラウンド勝率</span><span style={{ textAlign: 'right' }}>K/D</span>
+    </div>
+  );
+  return (
+    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ ...card, flex: '1 1 340px', minWidth: '300px' }}>
+        <div style={cap}>ロール別</div>
+        {head}
+        {roleRows.map(r => <UsageRow key={r.key} row={r} total={total} accent="#5CC8FF" pad />)}
+      </div>
+      <div style={{ ...card, flex: '1.4 1 420px', minWidth: '320px' }}>
+        <div style={cap}>エージェント別</div>
+        {head}
+        {agentRows.map(r => <UsageRow key={r.key} row={r} total={total} accent="#9B8CFF" />)}
+      </div>
+    </div>
+  );
+}
+
+function AgentRoleSection({ profile }) {
+  const meta = useAgentMeta();
+  return <AgentRoleView profile={profile} meta={meta} />;
 }
 
 function ProfileSection({ title, sub, children }) {
@@ -2583,6 +2700,10 @@ function PlayerPage({ puuid, matches, players, onSelectPlayer, onOpenMatch, mapM
         <AdviceSection profile={profile} matches={matches} puuid={puuid} />
       </ProfileSection>
 
+      <ProfileSection title="Agents & Roles" sub="エージェント・ロール別の使用率・ラウンド勝率・K/D（使用率 = 試合数 ÷ 通算試合数）">
+        <AgentRoleSection profile={profile} />
+      </ProfileSection>
+
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '26px' }}>
         {cards.map((c, i) => (
           <div key={i} style={{ flex: '1 1 140px', minWidth: '130px', border: `1px solid ${c.accent}44`, borderRadius: '6px', padding: '12px 14px', background: `${c.accent}0D` }}>
@@ -2765,6 +2886,7 @@ function MatchDashboardApp() {
 
   const handleFetchApi = useCallback(async (params) => {
     let { name, tag, region, apiKey, size, mode } = params;
+    mode = 'custom'; // カスタムゲームのみを対象にする
     setError(null);
     setApiLoading(true);
 
@@ -2857,6 +2979,18 @@ function MatchDashboardApp() {
   }, []);
   React.useEffect(() => { if (AUTO_LOAD.enabled) autoLoad(); }, []);
 
+  const [splashByMap, setSplashByMap] = useState({});
+  React.useEffect(() => {
+    fetch('https://valorant-api.com/v1/maps')
+      .then(r => r.json())
+      .then(json => {
+        const m = {};
+        (json.data || []).forEach(x => { const u = x.splash || x.stylizedBackgroundImage; if (x.displayName && u) m[x.displayName] = u; });
+        setSplashByMap(m);
+      })
+      .catch(() => {});
+  }, []);
+
   const handleExport = () => {
     const bundle = matches.map(m => m.raw);
     const blob = new Blob([JSON.stringify(bundle)], { type: 'application/json' });
@@ -2928,27 +3062,34 @@ function MatchDashboardApp() {
       >
         通算（{matches.length}試合）
       </div>
-      {matches.map(m => (
-        <div key={m.id} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-          <div
-            onClick={() => { setActiveTab(m.id); setMatchView('stats'); setPlayerView(null); }}
-            style={{
-              padding: '8px 28px 8px 16px', borderRadius: '4px', fontSize: '13px', fontWeight: 600,
-              cursor: 'pointer',
-              border: `1px solid ${activeTab === m.id && !playerView ? '#5CC8FF' : '#2A333B'}`,
-              color: activeTab === m.id && !playerView ? '#5CC8FF' : '#8B9AA8',
-              background: activeTab === m.id && !playerView ? '#5CC8FF14' : 'transparent'
-            }}
-          >
-            {m.dashboard.map}<span style={{ marginLeft: '6px', fontSize: '11px', fontWeight: 500, opacity: 0.7 }}>{modeLabelOf(m)}</span>
-          </div>
-          <span
-            onClick={() => handleRemoveMatch(m.id)}
-            title="この試合を削除"
-            style={{ position: 'absolute', right: '8px', fontSize: '13px', color: '#5A6570', cursor: 'pointer' }}
-          >×</span>
-        </div>
-      ))}
+      {matches.length > 0 && (() => {
+        const selId = activeTab !== 'aggregate' && !playerView && matches.some(m => m.id === activeTab) ? activeTab : '';
+        return (
+          <React.Fragment>
+            <select
+              value={selId}
+              onChange={(e) => { if (e.target.value) { setActiveTab(e.target.value); setMatchView('stats'); setPlayerView(null); } }}
+              style={{
+                padding: '8px 12px', borderRadius: '4px', fontSize: '13px', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer',
+                minWidth: '280px', maxWidth: '100%', background: '#12171D',
+                border: `1px solid ${selId ? '#5CC8FF' : '#2A333B'}`, color: selId ? '#5CC8FF' : '#8B9AA8',
+              }}
+            >
+              <option value="" disabled>試合を選択…（{matches.length}試合）</option>
+              {matches.map(m => (
+                <option key={m.id} value={m.id}>{formatDay(m.dashboard.gameStartTs)}　{m.dashboard.map}　{modeLabelOf(m)}</option>
+              ))}
+            </select>
+            {selId && (
+              <span
+                onClick={() => { if (window.confirm('この試合を一覧から削除しますか？（GitHub上のファイルは削除されません）')) handleRemoveMatch(selId); }}
+                title="選択中の試合を削除"
+                style={{ padding: '8px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: '1px solid #2A333B', color: '#8B9AA8' }}
+              >× 削除</span>
+            )}
+          </React.Fragment>
+        );
+      })()}
       <div
         onClick={() => setShowUpload(true)}
         style={{
@@ -3249,6 +3390,7 @@ function MatchDashboardApp() {
 
   return (
     <div style={{
+      position: 'relative', zIndex: 0,
       fontFamily: "'Rajdhani', 'Inter', system-ui, sans-serif",
       background: 'radial-gradient(circle at 20% 0%, #10151d 0%, #0a0d12 55%, #07090c 100%)',
       color: '#E8ECEF', padding: '28px', minHeight: '100%', boxSizing: 'border-box'
@@ -3256,6 +3398,15 @@ function MatchDashboardApp() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
       `}</style>
+
+      {splashByMap[MATCH_DATA.map] && (
+        <div aria-hidden="true" style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: -1, pointerEvents: 'none',
+          backgroundImage: `linear-gradient(180deg, rgba(10,13,18,0.15) 0%, rgba(7,9,12,0.80) 100%), url(${splashByMap[MATCH_DATA.map]})`,
+          backgroundSize: 'cover', backgroundPosition: 'center top', backgroundRepeat: 'no-repeat',
+          opacity: 0.15,
+        }} />
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px', marginBottom: '18px' }}>
         <div>
