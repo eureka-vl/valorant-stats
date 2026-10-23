@@ -1971,6 +1971,52 @@ function PlayerLink({ p, onOpen }) {
   );
 }
 
+// 試合ごとの値の平均と母標準偏差（n で割る）。手元の試合を全体として、そのばらつきを表す
+function meanSd(vals) {
+  const n = vals.length;
+  if (!n) return { mean: null, sd: null };
+  const mean = vals.reduce((a, v) => a + v, 0) / n;
+  const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / n);
+  return { mean, sd };
+}
+
+function TrendStatsTable({ history }) {
+  const rows = [
+    { label: 'ACS', key: 'acs', dec: 1, strong: true },
+    { label: 'ADR', key: 'adr', dec: 1 },
+    { label: 'K/D', key: 'kd', dec: 2 },
+    { label: 'HS%', key: 'hs_pct', dec: 1, unit: '%' },
+  ].map(r => ({ ...r, ...meanSd(history.map(h => Number(h[r.key]))) }));
+  const th = { padding: '4px 8px', color: '#6B7885', fontSize: '11px', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' };
+  const fmt = (v, r) => v === null ? '\u2014' : `${v.toFixed(r.dec)}${r.unit || ''}`;
+  return (
+    <div style={{ flex: '1 1 300px', minWidth: '280px', maxWidth: '400px', border: '1px solid #1E262E', borderRadius: '6px', padding: '14px 16px' }}>
+      <div style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase', marginBottom: '8px' }}>
+        平均値と標準偏差（{history.length}試合）
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #1E262E' }}>
+            <th style={{ ...th, textAlign: 'left' }}>指標</th><th style={th}>平均値</th><th style={th}>標準偏差</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.key} style={{ borderBottom: '1px solid #161B21', background: r.strong ? '#9B8CFF10' : 'transparent' }}>
+              <td style={{ padding: '9px 8px', fontWeight: 700, color: r.strong ? '#9B8CFF' : '#C7D0D8' }}>{r.label}</td>
+              <td style={{ padding: '9px 8px', textAlign: 'right', fontWeight: 700, color: '#EDEFF2' }}>{fmt(r.mean, r)}</td>
+              <td style={{ padding: '9px 8px', textAlign: 'right', color: '#9FA8B0' }}>{r.sd === null ? '\u2014' : `\u00b1${fmt(r.sd, r)}`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p style={{ fontSize: '11px', color: '#5A6570', margin: '10px 0 0', lineHeight: 1.6 }}>
+        試合ごとの値の単純平均と母標準偏差（n で割る）です。標準偏差が小さいほど、試合ごとの成績が安定しています。1試合のみの場合は0になります
+      </p>
+    </div>
+  );
+}
+
 function TrendChart({ history }) {
   const values = history.map(h => h.acs);
   const n = values.length;
@@ -2726,8 +2772,11 @@ function PlayerPage({ puuid, matches, players, onSelectPlayer, onOpenMatch, mapM
       </ProfileSection>
 
       <ProfileSection title="ACS Trend" sub="試合ごとのACS（緑=勝ち / 赤=負け、左が古い試合）">
-        <div style={{ border: '1px solid #1E262E', borderRadius: '6px', padding: '10px 14px', maxWidth: '520px' }}>
-          <TrendChart history={profile.history} />
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div style={{ border: '1px solid #1E262E', borderRadius: '6px', padding: '10px 14px', flex: '0 1 520px', minWidth: '300px' }}>
+            <TrendChart history={profile.history} />
+          </div>
+          <TrendStatsTable history={profile.history} />
         </div>
       </ProfileSection>
 
