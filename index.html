@@ -2183,7 +2183,37 @@ const COMP_CFG = {
   roleMissing: { Controller: 0.30, Initiator: 0.15, Sentinel: 0.15, Duelist: 0.15 }, // ロール不在の減点
   overRole: 0.15,        // 同じロールが3人以上のとき、超過1人ごとの減点
   perRoleCandidates: 3,  // 探索で各プレイヤー・各ロールから使う候補数
+  useSubRoles: false,    // サブロール機能（一時停止中。trueで再開）
+  subDup: 0.20,          // サブロール1が被ったときの減点（被り1つごと）
+  subRequired: ['Smoke', 'Recon', 'Flash'], // 構成で担ってほしいサブロール（サブロール1で1人、またはサブロール2で2人以上いれば担える）
+  subMissing: 0.12,      // 上記が担えていないときの減点（1つごと）
+  perGroupCandidates: 2, // サブロール考慮時: 各プレイヤー・各（ロール×サブロール1）から使う候補数
+  maxCandidates: 12,     // サブロール考慮時: 各プレイヤーの候補数の上限（総当たりと最良が一致することを確認済み）
 };
+
+// ---------- サブロール（一般的なロールに加えた、より細かい役割）----------
+// [サブロール1(主な役割), サブロール2(条件は満たすが1人で担えるとは限らない), BadMap(そのマップでは提案しない), 仮置きか]
+// ※ 4番目が true のものはシート未記載のため私が仮置きした値です。実際の表に合わせて書き換えてください
+const SUBROLE_DESC = {
+  Dive: 'チョークを自分の体で超えることを強みとする', Fight: 'チョークを超えるスキルは無いが、フラッシュやシールドで個人でファイトを仕掛けられる',
+  Lurker: 'ラークの役割をこなせる', Keeper: 'ガジェットでエリアの管理ができるセンチネル', Protector: 'エリア管理はできないが、チョークを止めるのに特化したセンチネル',
+  Recon: '索敵スキルを持つイニシエーター', Flash: 'フラッシュスキルを持つイニシエーター', Smoke: 'メインスモークをこなせるコントローラー', Viper: '他のコントローラーと組むことが前提のコントローラー',
+};
+const AGENT_SUB = {
+  jett: ['Dive', null, []], raze: ['Dive', null, ['Breeze', 'Icebox']], neon: ['Dive', null, []], waylay: ['Dive', null, ['Breeze']],
+  hush: ['Dive', 'Fight', []], iso: ['Fight', null, []], reyna: ['Fight', null, []], yoru: ['Fight', 'Lurker', []],
+  breach: ['Flash', null, ['Breeze', 'Summit']], fade: ['Recon', null, ['Breeze']], gekko: ['Flash', 'Recon', []], kayo: ['Flash', 'Recon', []],
+  phoenix: ['Fight', null, [], true], sova: ['Recon', null, [], true], skye: ['Flash', 'Recon', [], true], tejo: ['Recon', null, [], true],
+  brimstone: ['Smoke', null, [], true], omen: ['Smoke', 'Lurker', [], true], astra: ['Smoke', null, [], true], harbor: ['Smoke', null, [], true], clove: ['Smoke', null, [], true],
+  viper: ['Viper', null, [], true],
+  sage: ['Protector', null, [], true], cypher: ['Keeper', null, [], true], killjoy: ['Keeper', null, [], true], chamber: ['Keeper', null, [], true],
+  deadlock: ['Protector', null, [], true], vyse: ['Keeper', null, [], true],
+};
+const agentKey = (n) => String(n).toLowerCase().replace(/[^a-z0-9]/g, '');
+function subOf(name) {
+  const d = AGENT_SUB[agentKey(name)];
+  return d ? { sub1: d[0], sub2: d[1], bad: d[2], draft: !!d[3] } : { sub1: null, sub2: null, bad: [], draft: false };
+}
 
 function makeRoleOf(meta) {
   const fb = {};
@@ -2197,9 +2227,9 @@ function makeRoleOf(meta) {
 function compCatalog(meta) {
   const list = [];
   if (meta && Object.keys(meta.agents).length) {
-    Object.values(meta.agents).forEach(a => { if (a.name && COMP_ROLES.includes(a.role)) list.push({ name: a.name, role: a.role, icon: a.icon }); });
+    Object.values(meta.agents).forEach(a => { if (a.name && COMP_ROLES.includes(a.role)) list.push({ name: a.name, role: a.role, icon: a.icon, ...subOf(a.name) }); });
   } else {
-    Object.keys(AGENT_ROLE_FALLBACK).forEach(n => list.push({ name: n, role: AGENT_ROLE_FALLBACK[n], icon: null }));
+    Object.keys(AGENT_ROLE_FALLBACK).forEach(n => list.push({ name: n, role: AGENT_ROLE_FALLBACK[n], icon: null, ...subOf(n) }));
   }
   return list;
 }
@@ -2229,7 +2259,7 @@ function compPlayerModel(profile, rs, g, roleOf) {
   profile.agents.forEach(a => {
     const r = roleOf(a.label);
     const base = roleScore[r] !== undefined ? roleScore[r] : overall;
-    agents[String(a.label).toLowerCase()] = {
+    agents[agentKey(a.label)] = {
       score: compShrink(compBase({ acs: a.acs, kd: Number(a.kd), rwr: a.rounds ? 100 * a.rounds_won / a.rounds : 0 }, g), base, a.rounds, k),
       row: a,
     };
@@ -2238,39 +2268,65 @@ function compPlayerModel(profile, rs, g, roleOf) {
 }
 
 const compAgentScore = (model, name, role) => {
-  const a = model.agents[String(name).toLowerCase()];
-  return a ? a.score : model.roleScore[role] * COMP_CFG.noAgent;
+  const a = model.agents[agentKey(name)]; // Kayo と KAY/O のような表記の違いは、記号と大文字小文字を無視して同じエージェントとみなす
+  if (a) return a.score;
+  const rs = model.roleScore[role];
+  return (rs !== undefined ? rs : model.overall * COMP_CFG.noRole) * COMP_CFG.noAgent;
 };
 
 // 5人に重複なくエージェントを割り当て、指数の合計 − ロール構成の減点 が最大の組み合わせを探す（上位 topN 件）
 // pop: エージェント名(小文字) -> グループ全体での使用割合。未経験エージェントどうしは指数が同点になるため、その順位付けにだけ使う
-function compRecommend(models, catalog, topN, pop) {
+// opts.sub: サブロールのルールを使う / opts.map: 選択中のマップ（BadMapに登録されたエージェントは提案しない）
+function compRecommend(models, catalog0, topN, pop, opts) {
+  const o = opts || {};
+  const useSub = !!o.sub;
+  const mapLc = o.map ? String(o.map).toLowerCase() : '';
+  const catalog = mapLc ? catalog0.filter(ag => !(ag.bad || []).some(bm => String(bm).toLowerCase() === mapLc)) : catalog0;
   const popOf = (name) => (pop && pop[String(name).toLowerCase()]) || 0;
+  const sortFn = (x, y) => (y.s - x.s) || (y.t - x.t);
   const cand = models.map(m => {
-    const byRole = {};
+    const groups = {};
     catalog.forEach(ag => {
-      const played = !!m.agents[String(ag.name).toLowerCase()];
-      (byRole[ag.role] = byRole[ag.role] || []).push({ ag, played, s: compAgentScore(m, ag.name, ag.role), t: played ? 0 : popOf(ag.name) });
+      const played = !!m.agents[agentKey(ag.name)];
+      const gk = ag.role + '|' + (useSub ? (ag.sub1 || '') : '');
+      (groups[gk] = groups[gk] || []).push({ ag, played, s: compAgentScore(m, ag.name, ag.role), t: played ? 0 : popOf(ag.name) });
     });
-    const list = [];
-    Object.keys(byRole).forEach(r => { byRole[r].sort((a, b) => (b.s - a.s) || (b.t - a.t)); list.push(...byRole[r].slice(0, COMP_CFG.perRoleCandidates)); });
+    const per = useSub ? COMP_CFG.perGroupCandidates : COMP_CFG.perRoleCandidates;
+    let list = [];
+    Object.keys(groups).forEach(g => { groups[g].sort(sortFn); list.push(...groups[g].slice(0, per)); });
+    if (useSub && list.length > COMP_CFG.maxCandidates) {
+      const firsts = Object.keys(groups).map(g => groups[g][0]); // 各グループの先頭は必ず残す
+      const rest = list.filter(c => !firsts.includes(c)).sort(sortFn);
+      list = firsts.concat(rest).slice(0, COMP_CFG.maxCandidates);
+    }
     return list;
   });
-  // 「実績のあるエージェントは名前、未経験のエージェントはロール」で見た構成が同じものは、同じ構成として最良の1つだけ残す
+  // 「実績のあるエージェントは名前、未経験のエージェントはロール(とサブロール)」で見た構成が同じものは、最良の1つだけ残す
   const best = new Map(), picks = [], used = new Set();
   const finish = () => {
-    let total = 0, tie = 0; const cnt = {};
-    picks.forEach(pk => { total += pk.s; tie += pk.t; cnt[pk.ag.role] = (cnt[pk.ag.role] || 0) + 1; });
-    let pen = 0; const missing = [], over = [];
+    let total = 0, tie = 0; const cnt = {}, s1 = {}, s2 = {};
+    picks.forEach(pk => {
+      total += pk.s; tie += pk.t; cnt[pk.ag.role] = (cnt[pk.ag.role] || 0) + 1;
+      if (useSub) {
+        if (pk.ag.sub1) s1[pk.ag.sub1] = (s1[pk.ag.sub1] || 0) + 1;
+        if (pk.ag.sub2) s2[pk.ag.sub2] = (s2[pk.ag.sub2] || 0) + 1;
+      }
+    });
+    if (useSub && s1.Viper && !s1.Smoke) return; // Viper は Smoke と必ず組み合わせる
+    let pen = 0; const missing = [], over = [], dup = [], uncovered = [];
     COMP_ROLES.forEach(r => {
       if (!cnt[r]) { pen += COMP_CFG.roleMissing[r]; missing.push(r); }
       else if (cnt[r] > 2) { pen += (cnt[r] - 2) * COMP_CFG.overRole; over.push(r); }
     });
+    if (useSub) {
+      Object.keys(s1).forEach(k => { if (s1[k] > 1) { pen += COMP_CFG.subDup * (s1[k] - 1); dup.push(k); } });
+      COMP_CFG.subRequired.forEach(k => { if (!(s1[k] >= 1) && !(s2[k] >= 2)) { pen += COMP_CFG.subMissing; uncovered.push(k); } });
+    }
     const score = total - pen;
-    const key = picks.map(pk => pk.played ? pk.ag.name : '@' + pk.ag.role).join('|');
+    const key = picks.map(pk => pk.played ? pk.ag.name : '@' + pk.ag.role + (useSub ? ':' + (pk.ag.sub1 || '') : '')).join('|');
     const cur = best.get(key);
     if (!cur || score > cur.score + 1e-12 || (Math.abs(score - cur.score) <= 1e-12 && tie > cur.tie)) {
-      best.set(key, { score, tie, total, pen, missing, over, cnt, picks: picks.slice() });
+      best.set(key, { score, tie, total, pen, missing, over, dup, uncovered, s1, s2, cnt, picks: picks.slice() });
     }
   };
   const rec = (i) => {
@@ -2281,7 +2337,7 @@ function compRecommend(models, catalog, topN, pop) {
     }
   };
   rec(0);
-  return Array.from(best.values()).sort((a, b) => (b.score - a.score) || (b.tie - a.tie)).slice(0, topN);
+  return Array.from(best.values()).sort((x, y) => (y.score - x.score) || (y.tie - x.tie)).slice(0, topN);
 }
 
 const compIdxColor = (v) => v >= 1.05 ? '#4ADE80' : v <= 0.95 ? '#FF6B6B' : '#C7D0D8';
@@ -2295,13 +2351,201 @@ function CompAgentCell({ ag, size }) {
         : <div style={{ width: sz, height: sz, borderRadius: '6px', background: '#12171D', color: '#5A6570', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{ag.name.charAt(0)}</div>}
       <div>
         <div style={{ fontWeight: 700, color: '#EDEFF2', fontSize: '14px' }}>{ag.name}</div>
-        <div style={{ fontSize: '11px', color: '#6B7885' }}>{ROLE_JA[ag.role] || ag.role}</div>
+        <div style={{ fontSize: '11px', color: '#6B7885' }}>
+          {ROLE_JA[ag.role] || ag.role}
+          {COMP_CFG.useSubRoles && ag.sub1 && <span style={{ color: '#5CC8FF' }}> ／ {ag.sub1}{ag.sub2 ? ` + ${ag.sub2}` : ''}</span>}
+          {COMP_CFG.useSubRoles && ag.sub1 && ag.draft && <span title="シート未記載のため仮置きしたサブロールです" style={{ color: '#F5A623', marginLeft: '4px' }}>仮</span>}
+        </div>
       </div>
     </div>
   );
 }
 
-function CompResults({ people, matches, meta }) {
+// ---------- プロの構成データ（comps_team.csv: team,map,comp,played,wins）----------
+// リポジトリ直下（または data/）の comps_team.csv を読み込む。取得できない場合は、下の内蔵データを使う
+const PRO_COMPS_EMBEDDED = `team,map,comp,played,wins
+100 Thieves,Abyss,"Cypher, Harbor, Jett, Phoenix, Sova",1,0
+100 Thieves,Ascent,"Cypher, Jett, Omen, Phoenix, Sova",5,3
+100 Thieves,Haven,"Cypher, Neon, Omen, Phoenix, Sova",1,1
+100 Thieves,Lotus,"Chamber, Neon, Omen, Skye, Viper",3,1
+100 Thieves,Split,"Chamber, Fade, Neon, Omen, Viper",1,1
+100 Thieves,Split,"Chamber, Neon, Omen, Skye, Viper",1,1
+100 Thieves,Summit,"Chamber, Fade, Harbor, Neon, Sage",4,3
+100 Thieves,Sunset,"Cypher, Fade, Neon, Omen, Phoenix",1,1
+100 Thieves,Sunset,"Chamber, Fade, Neon, Omen, Phoenix",1,0
+EDward Gaming,Lotus,"Chamber, Fade, Neon, Omen, Viper",1,0
+EDward Gaming,Summit,"Fade, Neon, Omen, Sage, Yoru",1,0
+EDward Gaming,Summit,"Breach, Cypher, Omen, Tejo, Waylay",1,0
+EDward Gaming,Sunset,"Cypher, Kayo, Neon, Omen, Sova",1,0
+FUT Esports,Ascent,"Cypher, Jett, Omen, Phoenix, Sova",2,1
+FUT Esports,Lotus,"Cypher, Fade, Jett, Neon, Omen",1,0
+FUT Esports,Split,"Neon, Omen, Raze, Skye, Viper",1,0
+FUT Esports,Summit,"Cypher, Fade, Harbor, Neon, Phoenix",1,1
+FUT Esports,Sunset,"Cypher, Neon, Omen, Sova, Waylay",1,0
+G2 Esports,Abyss,"Astra, Harbor, Neon, Sova, Waylay",4,2
+G2 Esports,Ascent,"Chamber, Neon, Omen, Sova, Vyse",3,2
+G2 Esports,Haven,"Chamber, Fade, Neon, Omen, Yoru",1,0
+G2 Esports,Lotus,"Omen, Raze, Skye, Viper, Vyse",4,3
+G2 Esports,Split,"Chamber, Neon, Omen, Skye, Viper",3,2
+G2 Esports,Summit,"Chamber, Fade, Harbor, Neon, Vyse",1,0
+G2 Esports,Sunset,"Chamber, Neon, Omen, Sage, Skye",1,1
+Global Esports,Abyss,"Astra, Omen, Sova, Waylay, Yoru",1,0
+Global Esports,Ascent,"Chamber, Neon, Omen, Sage, Sova",1,1
+Global Esports,Split,"Fade, Neon, Omen, Viper, Yoru",1,0
+Global Esports,Summit,"Astra, Chamber, Fade, Neon, Sage",1,1
+Global Esports,Summit,"Astra, Raze, Skye, Tejo, Veto",1,0
+Global Esports,Sunset,"Chamber, Fade, Neon, Omen, Yoru",2,1
+JD Gaming,Abyss,"Harbor, Omen, Sova, Waylay, Yoru",1,1
+JD Gaming,Ascent,"Cypher, Deadlock, Omen, Sova, Yoru",1,0
+JD Gaming,Haven,"Cypher, Neon, Omen, Sova, Waylay",1,0
+JD Gaming,Lotus,"Chamber, Fade, Omen, Raze, Vyse",1,0
+JD Gaming,Summit,"Cypher, Fade, Omen, Waylay, Yoru",1,0
+Karmine Corp,Abyss,"Cypher, Omen, Sova, Waylay, Yoru",1,1
+Karmine Corp,Ascent,"Cypher, Neon, Omen, Phoenix, Sova",1,1
+Karmine Corp,Haven,"Cypher, Neon, Omen, Phoenix, Sova",2,0
+Karmine Corp,Summit,"Chamber, Fade, Neon, Omen, Viper",2,0
+Karmine Corp,Sunset,"Chamber, Fade, Neon, Omen, Viper",2,2
+LOUD,Ascent,"Cypher, Omen, Sova, Waylay, Yoru",1,0
+LOUD,Haven,"Chamber, Neon, Omen, Sova, Viper",3,3
+LOUD,Lotus,"Chamber, Fade, Neon, Omen, Viper",2,1
+LOUD,Lotus,"Fade, Neon, Omen, Viper, Vyse",1,0
+LOUD,Split,"Fade, Neon, Omen, Viper, Yoru",2,2
+LOUD,Summit,"Chamber, Fade, Neon, Omen, Sage",5,4
+LOUD,Sunset,"Chamber, Neon, Omen, Sage, Sova",4,3
+NRG,Ascent,"Cypher, Jett, Omen, Phoenix, Sova",1,0
+NRG,Haven,"Chamber, Neon, Omen, Phoenix, Sova",3,1
+NRG,Lotus,"Fade, Omen, Raze, Viper, Vyse",2,2
+NRG,Split,"Fade, Neon, Omen, Raze, Viper",1,1
+NRG,Summit,"Brimstone, Cypher, Kayo, Neon, Sova",3,2
+NRG,Sunset,"Chamber, Fade, Kayo, Neon, Omen",2,1
+Nongshim RedForce,Abyss,"Harbor, Neon, Omen, Sova, Yoru",1,1
+Nongshim RedForce,Ascent,"Chamber, Neon, Omen, Sage, Sova",1,0
+Nongshim RedForce,Haven,"Killjoy, Neon, Omen, Sova, Yoru",2,1
+Nongshim RedForce,Lotus,"Chamber, Fade, Neon, Omen, Viper",1,0
+Nongshim RedForce,Split,"Fade, Neon, Omen, Viper, Yoru",2,0
+Nongshim RedForce,Summit,"Chamber, Fade, Harbor, Neon, Sage",3,2
+Nongshim RedForce,Sunset,"Cypher, Fade, Omen, Waylay, Yoru",2,1
+Nongshim RedForce,Sunset,"Cypher, Fade, Neon, Omen, Yoru",1,1
+Paper Rex,Ascent,"Chamber, Omen, Sage, Sova, Yoru",2,2
+Paper Rex,Haven,"Astra, Chamber, Fade, Phoenix, Yoru",2,1
+Paper Rex,Lotus,"Fade, Omen, Raze, Vyse, Yoru",3,2
+Paper Rex,Split,"Fade, Omen, Raze, Viper, Yoru",2,0
+Paper Rex,Summit,"Fade, Neon, Omen, Sage, Viper",1,0
+Paper Rex,Sunset,"Chamber, Fade, Omen, Raze, Sage",1,0
+T1,Abyss,"Harbor, Omen, Sova, Waylay, Yoru",1,1
+T1,Abyss,"Brimstone, Omen, Sova, Waylay, Yoru",1,0
+T1,Ascent,"Chamber, Neon, Omen, Sage, Sova",4,1
+T1,Haven,"Killjoy, Neon, Omen, Phoenix, Sova",1,1
+T1,Lotus,"Chamber, Fade, Neon, Omen, Viper",4,2
+T1,Summit,"Chamber, Fade, Neon, Omen, Sage",2,1
+T1,Summit,"Chamber, Fade, Harbor, Neon, Sage",1,0
+T1,Sunset,"Chamber, Fade, Neon, Omen, Sage",1,1
+TYLOO,Lotus,"Chamber, Fade, Neon, Omen, Viper",2,0
+TYLOO,Split,"Jett, Omen, Raze, Skye, Viper",1,0
+TYLOO,Summit,"Cypher, Fade, Omen, Phoenix, Waylay",1,1
+TYLOO,Sunset,"Chamber, Fade, Neon, Omen, Sage",1,0
+Team Liquid,Abyss,"Cypher, Harbor, Sova, Waylay, Yoru",1,0
+Team Liquid,Ascent,"Cypher, Jett, Omen, Phoenix, Sova",1,0
+Team Liquid,Haven,"Fade, Harbor, Killjoy, Raze, Yoru",1,1
+Team Liquid,Lotus,"Cypher, Fade, Omen, Raze, Yoru",2,1
+Team Liquid,Split,"Astra, Fade, Raze, Viper, Yoru",2,1
+Team Liquid,Summit,"Fade, Harbor, Raze, Vyse, Yoru",1,0
+Team Vitality,Abyss,"Astra, Harbor, Jett, Sova, Yoru",3,2
+Team Vitality,Ascent,"Chamber, Omen, Sage, Sova, Yoru",3,2
+Team Vitality,Haven,"Astra, Chamber, Neon, Sova, Yoru",3,1
+Team Vitality,Lotus,"Chamber, Fade, Omen, Raze, Viper",3,3
+Team Vitality,Split,"Fade, Neon, Omen, Viper, Yoru",3,2
+Team Vitality,Summit,"Chamber, Fade, Harbor, Neon, Phoenix",4,2
+Team Vitality,Summit,"Chamber, Harbor, Neon, Phoenix, Sova",1,1
+Team Vitality,Sunset,"Chamber, Fade, Kayo, Neon, Omen",1,0
+Xi Lai Gaming,Abyss,"Astra, Harbor, Sova, Waylay, Yoru",1,0
+Xi Lai Gaming,Summit,"Chamber, Fade, Omen, Sage, Waylay",1,0
+Xi Lai Gaming,Sunset,"Cypher, Fade, Omen, Waylay, Yoru",2,0
+`;
+
+function parseProComps(text) {
+  const rows = csvParse(text);
+  if (rows.length < 2) return [];
+  const col = {}; rows[0].forEach((h, i) => { col[String(h).trim().toLowerCase()] = i; });
+  const out = [];
+  rows.slice(1).forEach(c => {
+    const agents = String(c[col.comp] || '').split(',').map(x => x.trim()).filter(Boolean);
+    const played = parseInt(c[col.played], 10), wins = parseInt(c[col.wins], 10);
+    if (agents.length === 5 && new Set(agents.map(agentKey)).size === 5 && played > 0 && wins >= 0 && wins <= played) {
+      out.push({ team: String(c[col.team] || '').trim(), map: String(c[col.map] || '').trim(), agents, played, wins });
+    }
+  });
+  return out;
+}
+
+async function loadProComps() {
+  if (AUTO_LOAD.enabled) {
+    for (const dir of ['', 'data/']) {
+      try {
+        const r = await fetch(`https://raw.githubusercontent.com/${AUTO_LOAD.owner}/${AUTO_LOAD.repo}/${AUTO_LOAD.branch}/${dir}comps_team.csv`);
+        if (r.ok) { const rows = parseProComps(await r.text()); if (rows.length) return { status: 'ready', rows, source: 'GitHub' }; }
+      } catch (e) {}
+    }
+  }
+  return { status: 'ready', rows: parseProComps(PRO_COMPS_EMBEDDED), source: '内蔵データ' };
+}
+
+let PRO_COMPS_PROMISE = null;
+function useProComps() {
+  const [st, setSt] = useState({ status: 'loading', rows: [], source: '' });
+  React.useEffect(() => {
+    if (!PRO_COMPS_PROMISE) PRO_COMPS_PROMISE = loadProComps();
+    let alive = true;
+    PRO_COMPS_PROMISE.then(r => { if (alive) setSt(r); });
+    return () => { alive = false; };
+  }, []);
+  return st;
+}
+
+const COMP_PERMS = (() => {
+  const res = [];
+  const rec = (a, rest) => { if (!rest.length) { res.push(a); return; } rest.forEach((x, i) => rec(a.concat(x), rest.filter((_, j) => j !== i))); };
+  rec([], [0, 1, 2, 3, 4]);
+  return res;
+})();
+
+// プロの構成（同じエージェントの組み合わせは、チームやマップをまたいで合算）ごとに、
+// 5人へのエージェントの割り当てを全パターン試し、指数の合計が最大になる割り当てを求めて、指数の高い順に並べる
+function compProRank(models, catalog, rows, mapSel) {
+  if (models.length !== 5) return [];
+  const mapLc = mapSel ? String(mapSel).toLowerCase() : '';
+  const byKey = {};
+  catalog.forEach(a => { byKey[agentKey(a.name)] = a; });
+  const groups = new Map();
+  rows.forEach(r => {
+    if (mapLc && r.map.toLowerCase() !== mapLc) return;
+    const gk = r.agents.map(agentKey).sort().join('|');
+    let g = groups.get(gk);
+    if (!g) { g = { agents: r.agents, played: 0, wins: 0, teams: new Set(), maps: {} }; groups.set(gk, g); }
+    g.played += r.played; g.wins += r.wins; g.teams.add(r.team);
+    const mp = g.maps[r.map] || (g.maps[r.map] = { played: 0, wins: 0 });
+    mp.played += r.played; mp.wins += r.wins;
+  });
+  const out = [];
+  groups.forEach(g => {
+    const ags = g.agents.map(n => byKey[agentKey(n)] || { name: n, role: 'Unknown', icon: null, sub1: null, sub2: null, bad: [], draft: false });
+    const sc = models.map(m => ags.map(a => compAgentScore(m, a.name, a.role)));
+    let bestPerm = null, bestTotal = -Infinity;
+    COMP_PERMS.forEach(pm => {
+      let t = 0; for (let i = 0; i < 5; i++) t += sc[i][pm[i]];
+      if (t > bestTotal) { bestTotal = t; bestPerm = pm; }
+    });
+    const cnt = {}; ags.forEach(a => { cnt[a.role] = (cnt[a.role] || 0) + 1; });
+    out.push({
+      total: bestTotal, cnt, played: g.played, wins: g.wins, wr: (g.wins + 2) / (g.played + 4), // 実績が少ない勝率は50%寄りに補正して同点の順位付けに使う
+      teams: Array.from(g.teams), maps: g.maps,
+      picks: models.map((_, i) => ({ ag: ags[bestPerm[i]], s: sc[i][bestPerm[i]] })),
+    });
+  });
+  return out.sort((a, b) => (b.total - a.total) || (b.wr - a.wr) || (b.played - a.played));
+}
+
+function CompResults({ people, matches, meta, opts = {}, pro, proMap }) {
   const key = people.map(pp => pp.puuid).join(',');
   const data = React.useMemo(() => {
     const roleOf = makeRoleOf(meta);
@@ -2318,86 +2562,112 @@ function CompResults({ people, matches, meta }) {
       pop[nm] = (pop[nm] || 0) + 1; popTotal += 1;
     }));
     Object.keys(pop).forEach(k => { pop[k] /= (popTotal || 1); });
-    return { models, results: compRecommend(models.map(m => m.model), catalog, 3, pop) };
-  }, [key, matches, meta]);
+    const mm = models.map(m => m.model);
+    return {
+      models,
+      originals: compRecommend(mm, catalog, 3, pop, opts),                       // 代替案: 従来どおり指数のみ
+      proList: compProRank(mm, catalog, (pro && pro.rows) || [], proMap),        // おすすめ: プロの構成から
+    };
+  }, [key, matches, meta, opts.sub, opts.map, pro, proMap]);
 
-  const best = data.results[0];
-  if (!best) return <p style={{ fontSize: '13px', color: '#8B9AA8' }}>候補のエージェント情報を取得できませんでした。</p>;
+  const best = data.proList[0];
   const card = { border: '1px solid #1E262E', borderRadius: '6px', padding: '16px 18px' };
   const th = { padding: '6px 8px', color: '#6B7885', fontSize: '11px', fontWeight: 700, textAlign: 'left', whiteSpace: 'nowrap' };
   const evidence = (m, pk) => {
-    const a = m.model.agents[pk.ag.name.toLowerCase()];
+    const a = m.model.agents[agentKey(pk.ag.name)];
     if (a) return `${a.row.matches}試合 · ACS ${a.row.acs} · K/D ${Number(a.row.kd).toFixed(2)} · ラウンド勝率 ${a.row.rounds ? (100 * a.row.rounds_won / a.row.rounds).toFixed(1) : '0.0'}%`;
     return m.model.roleRounds[pk.ag.role] > 0
       ? `未経験（${ROLE_JA[pk.ag.role]}の実績 ${m.model.roleMatches[pk.ag.role]}試合から推定）`
-      : `未経験（${ROLE_JA[pk.ag.role]}も未経験のため、全体成績から推定）`;
+      : `未経験（${ROLE_JA[pk.ag.role] || 'ロール不明'}も未経験のため、全体成績から推定）`;
   };
+  const roleChips = (cnt, strict) => (
+    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+      {COMP_ROLES.map(r => (
+        <span key={r} style={{
+          padding: '3px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 700,
+          border: `1px solid ${cnt[r] || !strict ? '#2A333B' : '#FF6B6B'}`, color: cnt[r] || !strict ? '#C7D0D8' : '#FF6B6B',
+        }}>{ROLE_JA[r]} ×{cnt[r] || 0}</span>
+      ))}
+    </div>
+  );
+  const mapsText = best ? (() => {
+    const e = Object.entries(best.maps).sort((x, y) => y[1].played - x[1].played);
+    return e.slice(0, 4).map(([mp, v]) => `${mp} ${v.played}試合${v.wins}勝`).join(' / ') + (e.length > 4 ? ` ほか${e.length - 4}マップ` : '');
+  })() : '';
+  const teamsText = best ? best.teams.slice(0, 4).join('、') + (best.teams.length > 4 ? ` ほか${best.teams.length - 4}チーム` : '') : '';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div style={card}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap', marginBottom: '10px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#9B8CFF', textTransform: 'uppercase', letterSpacing: '0.06em' }}>おすすめ構成</span>
-          <span style={{ fontSize: '24px', fontWeight: 700, color: compIdxColor(best.total / 5) }}>{(best.total / 5).toFixed(2)}</span>
-          <span style={{ fontSize: '12px', color: '#6B7885' }}>5人の指数の平均（1.00 = 全体平均）</span>
-        </div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-          {COMP_ROLES.map(r => (
-            <span key={r} style={{
-              padding: '3px 10px', borderRadius: '4px', fontSize: '12px', fontWeight: 700,
-              border: `1px solid ${best.cnt[r] ? '#2A333B' : '#FF6B6B'}`, color: best.cnt[r] ? '#C7D0D8' : '#FF6B6B',
-            }}>{ROLE_JA[r]} ×{best.cnt[r] || 0}</span>
-          ))}
-        </div>
-        {(best.missing.length > 0 || best.over.length > 0) && (
-          <p style={{ fontSize: '12px', color: '#F5A623', margin: '0 0 12px' }}>
-            ⚠ {best.missing.length > 0 ? `${best.missing.map(r => ROLE_JA[r]).join('・')}が不在の構成です。` : ''}
-            {best.over.length > 0 ? `${best.over.map(r => ROLE_JA[r]).join('・')}が3人以上です。` : ''}
-            この5人の実績では、これが最も指数の高い構成でした。
+      {best ? (
+        <div style={card}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap', marginBottom: '6px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: '#9B8CFF', textTransform: 'uppercase', letterSpacing: '0.06em' }}>おすすめ構成（プロの構成より）</span>
+            <span style={{ fontSize: '24px', fontWeight: 700, color: compIdxColor(best.total / 5) }}>{(best.total / 5).toFixed(2)}</span>
+            <span style={{ fontSize: '12px', color: '#6B7885' }}>5人の指数の平均（1.00 = 全体平均）</span>
+          </div>
+          <p style={{ fontSize: '12px', color: '#8B9AA8', margin: '0 0 4px' }}>
+            プロの構成 {data.proList.length}件（{proMap || '全マップ'}）のうち、この5人の指数が最も高い構成です
           </p>
-        )}
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ borderBottom: '1px solid #1E262E' }}>
-              <th style={th}>プレイヤー</th><th style={th}>エージェント</th><th style={{ ...th, textAlign: 'right' }}>指数</th><th style={th}>根拠</th>
-            </tr></thead>
-            <tbody>
-              {best.picks.map((pk, i) => {
-                const m = data.models[i];
-                return (
-                  <tr key={m.p.puuid} style={{ borderBottom: '1px solid #161B21' }}>
-                    <td style={{ padding: '10px 8px', fontWeight: 700, color: '#EDEFF2', whiteSpace: 'nowrap' }}>{m.p.name}</td>
-                    <td style={{ padding: '10px 8px' }}>
-                      <CompAgentCell ag={pk.ag} />
-                      {!pk.played && <div style={{ fontSize: '10px', color: '#F5A623', marginTop: '3px' }}>未経験 ／ {ROLE_JA[pk.ag.role]}の別のエージェントでも指数は同じ</div>}
-                    </td>
-                    <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: '16px', fontWeight: 700, color: compIdxColor(pk.s) }}>{pk.s.toFixed(2)}</td>
-                    <td style={{ padding: '10px 8px', fontSize: '12px', color: m.model.agents[pk.ag.name.toLowerCase()] ? '#9FA8B0' : '#6B7885' }}>{evidence(m, pk)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <p style={{ fontSize: '12px', color: '#6B7885', margin: '0 0 12px' }}>
+            プロの実績：{mapsText} ／ 計{best.played}試合 {best.wins}勝（{(100 * best.wins / best.played).toFixed(0)}%） ／ 使用チーム：{teamsText}
+          </p>
+          {roleChips(best.cnt, false)}
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr style={{ borderBottom: '1px solid #1E262E' }}>
+                <th style={th}>プレイヤー</th><th style={th}>エージェント</th><th style={{ ...th, textAlign: 'right' }}>指数</th><th style={th}>根拠</th>
+              </tr></thead>
+              <tbody>
+                {best.picks.map((pk, i) => {
+                  const m = data.models[i];
+                  return (
+                    <tr key={m.p.puuid} style={{ borderBottom: '1px solid #161B21' }}>
+                      <td style={{ padding: '10px 8px', fontWeight: 700, color: '#EDEFF2', whiteSpace: 'nowrap' }}>{m.p.name}</td>
+                      <td style={{ padding: '10px 8px' }}><CompAgentCell ag={pk.ag} /></td>
+                      <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: '16px', fontWeight: 700, color: compIdxColor(pk.s) }}>{pk.s.toFixed(2)}</td>
+                      <td style={{ padding: '10px 8px', fontSize: '12px', color: m.model.agents[agentKey(pk.ag.name)] ? '#9FA8B0' : '#6B7885' }}>{evidence(m, pk)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div style={card}>
+          <p style={{ fontSize: '13px', color: '#F5A623', margin: 0 }}>
+            {pro && pro.status === 'loading' ? 'プロの構成データを読み込み中…'
+              : proMap ? `「${proMap}」のプロの構成データがありません。マップを変更するか、未選択に戻してください。`
+              : 'プロの構成データがありません。'}
+            下の代替案（オリジナル構成）は、指数のみを基準にした提案です。
+          </p>
+        </div>
+      )}
 
-      {data.results.length > 1 && (
-        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-          {data.results.slice(1).map((r, idx) => (
-            <div key={idx} style={{ ...card, flex: '1 1 320px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase' }}>代替案 {idx + 1}</span>
-                <span style={{ fontSize: '18px', fontWeight: 700, color: compIdxColor(r.total / 5) }}>{(r.total / 5).toFixed(2)}</span>
-                <span style={{ fontSize: '11px', color: '#6B7885' }}>おすすめとの差 {((r.score - best.score) / 5).toFixed(2)}</span>
-              </div>
-              {r.picks.map((pk, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '5px 0', borderBottom: '1px solid #161B21' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#C7D0D8' }}>{data.models[i].p.name}</span>
-                  <CompAgentCell ag={pk.ag} size={26} />
+      {data.originals.length > 0 && (
+        <div>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', marginBottom: '10px' }}>
+            代替案（オリジナル構成：プロの構成にとらわれず、指数のみを基準に作成）
+          </div>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            {data.originals.map((r, idx) => (
+              <div key={idx} style={{ ...card, flex: '1 1 300px' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#8B9AA8', textTransform: 'uppercase' }}>代替案 {idx + 1}</span>
+                  <span style={{ fontSize: '18px', fontWeight: 700, color: compIdxColor(r.total / 5) }}>{(r.total / 5).toFixed(2)}</span>
+                  {best && <span style={{ fontSize: '11px', color: '#6B7885' }}>おすすめとの差 {((r.total - best.total) / 5 >= 0 ? '+' : '') + ((r.total - best.total) / 5).toFixed(2)}</span>}
                 </div>
-              ))}
-              {(r.missing.length > 0) && <p style={{ fontSize: '11px', color: '#F5A623', margin: '8px 0 0' }}>⚠ {r.missing.map(x => ROLE_JA[x]).join('・')}が不在</p>}
-            </div>
-          ))}
+                {roleChips(r.cnt, true)}
+                {r.picks.map((pk, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '5px 0', borderBottom: '1px solid #161B21' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#C7D0D8' }}>{data.models[i].p.name}</span>
+                    <CompAgentCell ag={pk.ag} size={26} />
+                  </div>
+                ))}
+                {r.missing.length > 0 && <p style={{ fontSize: '11px', color: '#F5A623', margin: '8px 0 0' }}>⚠ {r.missing.map(x => ROLE_JA[x]).join('・')}が不在</p>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -2430,9 +2700,9 @@ function CompResults({ people, matches, meta }) {
       </div>
 
       <p style={{ fontSize: '11px', color: '#5A6570', margin: 0, lineHeight: 1.7 }}>
-        指数 = ACS 40% + K/D 30% + ラウンド勝率 30% を、登録プレイヤー全体の平均で割った値（1.00 = 平均）。試合数が少ない実績は、ロール → 本人全体 → 全体平均の順に引き寄せて補正しています（ラウンド数 ÷ (ラウンド数 + {COMP_CFG.k})）。
-        未経験のエージェントは、そのロールの実績から推定して ×{COMP_CFG.noAgent} としています。構成の減点は、コントローラー不在 −{COMP_CFG.roleMissing.Controller.toFixed(2)}、他のロール不在 −{COMP_CFG.roleMissing.Duelist.toFixed(2)}、同じロールが3人以上は1人ごとに −{COMP_CFG.overRole.toFixed(2)}。
-        エージェントは5人で重複しません。マップや相手との相性は考慮していません。
+        おすすめ構成は、プロの構成データ（{pro && pro.source}）の中から、5人へのエージェントの割り当てを全パターン試して、指数の合計が最大になるものを選んでいます（同じ指数のときは、プロの勝率が高い順。実績の少ない勝率は50%寄りに補正）。同じエージェントの組み合わせは、チームやマップをまたいで合算しています。
+        代替案は、プロの構成にとらわれず、指数だけを基準にしたオリジナル構成です（コントローラー不在 −{COMP_CFG.roleMissing.Controller.toFixed(2)}、他のロール不在 −{COMP_CFG.roleMissing.Duelist.toFixed(2)}、同じロールが3人以上は1人ごとに −{COMP_CFG.overRole.toFixed(2)}）。
+        指数 = ACS 40% + K/D 30% + ラウンド勝率 30% を、登録プレイヤー全体の平均で割った値（1.00 = 平均）。試合数が少ない実績は、ロール → 本人全体 → 全体平均の順に引き寄せて補正しています（ラウンド数 ÷ (ラウンド数 + {COMP_CFG.k})）。未経験のエージェントは、そのロールの実績から推定して ×{COMP_CFG.noAgent} としています。
       </p>
     </div>
   );
@@ -2440,10 +2710,16 @@ function CompResults({ people, matches, meta }) {
 
 function CompPage({ matches, players }) {
   const [slots, setSlots] = useState(['', '', '', '', '']); // プレイヤー1〜5のpuuid
-  const [mapSel, setMapSel] = useState('');                  // マップ選択（UIのみ。マップ別の構成登録は今後対応）
+  const [mapSel, setMapSel] = useState('');                  // 選んだマップのプロ構成だけを対象にする（未選択なら全マップ）
   const meta = useAgentMeta();
+  const pro = useProComps();
   const avail = players.filter(pp => matches.some(m => m.dashboard.players.some(x => x.puuid === pp.puuid)));
-  const maps = Array.from(new Set(matches.map(m => m.dashboard.map).filter(Boolean))).sort();
+  const proMaps = new Set(pro.rows.map(r => r.map.toLowerCase()));
+  // プロ構成のあるマップ + 読み込んだ試合のマップ + 定番のマップ
+  const maps = Array.from(new Set([
+    ...pro.rows.map(r => r.map), ...matches.map(m => m.dashboard.map),
+    'Abyss', 'Ascent', 'Bind', 'Breeze', 'Corrode', 'Fracture', 'Haven', 'Icebox', 'Lotus', 'Pearl', 'Split', 'Sunset',
+  ].filter(Boolean))).sort();
   const valid = slots.map(id => (avail.some(pp => pp.puuid === id) ? id : ''));
   const people = valid.filter(Boolean).map(id => avail.find(pp => pp.puuid === id));
   const setSlot = (i, v) => setSlots(prev => prev.map((x, j) => (j === i ? v : x)));
@@ -2459,7 +2735,7 @@ function CompPage({ matches, players }) {
     <div>
       <div style={{ marginBottom: '22px' }}>
         <h1 style={{ fontSize: '26px', fontWeight: 700, margin: 0, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#F2F5F7' }}>Team Composition</h1>
-        <p style={{ fontSize: '13px', color: '#6B7885', margin: '6px 0 0' }}>5人を選ぶと、各自のロール・エージェント別の成績から、おすすめの構成を提案します（{matches.length}試合のデータを使用）</p>
+        <p style={{ fontSize: '13px', color: '#6B7885', margin: '6px 0 0' }}>5人を選ぶと、プロの構成の中から、各自の成績に合う構成を提案します（{matches.length}試合のデータを使用）</p>
       </div>
       <ProfileSection title="Select" sub={`マップとプレイヤー5人を選択（${people.length}/5）`}>
         {avail.length < 5 ? (
@@ -2468,10 +2744,10 @@ function CompPage({ matches, players }) {
           <div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div style={cell}>
-                <div style={label}>マップ選択 <span style={{ color: '#F5A623', fontWeight: 600 }}>（今後対応）</span></div>
+                <div style={label}>マップ選択 <span style={{ color: '#5CC8FF', fontWeight: 600 }}>（プロ構成を絞り込み）</span></div>
                 <select value={mapSel} onChange={e => setMapSel(e.target.value)} style={selStyle(!!mapSel)}>
-                  <option value="">マップを選択</option>
-                  {maps.map(mp => <option key={mp} value={mp}>{mp}</option>)}
+                  <option value="">マップを選択（全マップ）</option>
+                  {maps.map(mp => <option key={mp} value={mp}>{mp}{proMaps.has(mp.toLowerCase()) ? '' : '（プロ構成なし）'}</option>)}
                 </select>
               </div>
               {slots.map((_, i) => {
@@ -2490,7 +2766,9 @@ function CompPage({ matches, players }) {
               })}
             </div>
             <div style={{ display: 'flex', gap: '14px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '11px', color: '#5A6570' }}>※ マップ別のおすすめ構成の登録は今後対応予定です。現在はマップを選んでも提案は変わりません</span>
+              <span style={{ fontSize: '11px', color: '#5A6570' }}>
+                ※ マップを選ぶと、そのマップのプロ構成の中から提案します（未選択のときは全マップが対象）。プロ構成データ：{pro.status === 'loading' ? '読み込み中…' : `${pro.rows.length}件（${pro.source}）`}
+              </span>
               {people.length > 0 && (
                 <span onClick={() => { setSlots(['', '', '', '', '']); setMapSel(''); }} style={{ fontSize: '12px', color: '#6B7885', cursor: 'pointer', textDecoration: 'underline' }}>選択をクリア</span>
               )}
@@ -2499,8 +2777,8 @@ function CompPage({ matches, players }) {
         )}
       </ProfileSection>
       {people.length === 5 && (
-        <ProfileSection title="Recommendation" sub="指数の合計が最大になる構成（エージェントは重複なし）">
-          <CompResults people={people} matches={matches} meta={meta} />
+        <ProfileSection title="Recommendation" sub="プロの構成から指数が最も高いものを提案（代替案は指数のみのオリジナル構成）">
+          <CompResults people={people} matches={matches} meta={meta} opts={{ sub: false, map: '' }} pro={pro} proMap={mapSel} />
         </ProfileSection>
       )}
     </div>
