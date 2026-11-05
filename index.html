@@ -2767,7 +2767,7 @@ function CompPage({ matches, players }) {
             </div>
             <div style={{ display: 'flex', gap: '14px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '11px', color: '#5A6570' }}>
-                ※ マップを選ぶと、そのマップのプロ構成の中から提案します（未選択のときは全マップが対象）。プロ構成データ：{pro.status === 'loading' ? '読み込み中…' : `${pro.rows.length}件（${pro.source}）`}
+                ※ マップを選ぶと、そのマップのプロ構成の中から提案します（未選択のときは全マップが対象）。プロ構成データ：{pro.status === 'loading' ? '読み込み中…' : `${pro.rows.length}件（${pro.source}）`} 。データはChampions2026の全試合。 BindのみMasters Santiagoのデータを使用。
               </span>
               {people.length > 0 && (
                 <span onClick={() => { setSlots(['', '', '', '', '']); setMapSel(''); }} style={{ fontSize: '12px', color: '#6B7885', cursor: 'pointer', textDecoration: 'underline' }}>選択をクリア</span>
